@@ -79,9 +79,8 @@ permissions:
 jobs:
   review:
     uses: fluffyx/github-workflows/.github/workflows/charlie-review.yml@main
+    secrets: inherit
 ```
-
-If the shared workflow needs repository secrets in the future, add `secrets: inherit` to the caller job.
 
 ## Conventions
 
