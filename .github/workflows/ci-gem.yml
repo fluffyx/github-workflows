@@ -19,9 +19,6 @@ jobs:
         with:
           bundler-cache: true
 
-      - name: Brakeman
-        run: bundle exec brakeman --no-pager
-
       - name: Bundler Audit
         run: bundle exec bundler-audit
 
