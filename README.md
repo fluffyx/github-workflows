@@ -8,7 +8,7 @@ Reusable GitHub Actions workflows for `fluffyx/*` repositories.
 |----------|------|-----|
 | **CI (Rails)** | `ci-rails.yml` | Rails + SvelteKit apps |
 | **CI (Frontend)** | `ci-frontend.yml` | Pure frontend / component library repos |
-| **Review Pipeline** | `review-pipeline.yml` | Charlie auto-review on PRs |
+| **Review Pipeline** | `charlie-review.yml` | Charlie auto-review on PRs |
 
 ## CI (Rails)
 
@@ -65,10 +65,10 @@ Prepares PR state labels, clears previous review-pipeline labels on each new PR 
 
 ### Caller example
 
-Create `.github/workflows/review-pipeline.yml` in your repo:
+Create `.github/workflows/charlie-review.yml` in your repo:
 
 ```yaml
-name: Review Pipeline
+name: Charlie Review
 on:
   pull_request:
     types: [opened, reopened, synchronize]
@@ -78,7 +78,7 @@ permissions:
   pull-requests: write
 jobs:
   review:
-    uses: fluffyx/github-workflows/.github/workflows/review-pipeline.yml@main
+    uses: fluffyx/github-workflows/.github/workflows/charlie-review.yml@main
 ```
 
 If the shared workflow needs repository secrets in the future, add `secrets: inherit` to the caller job.
