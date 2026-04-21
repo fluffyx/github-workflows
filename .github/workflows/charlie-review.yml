@@ -25,7 +25,7 @@ jobs:
         with:
           repository: fluffyx/github-workflows
           ref: main
-          token: ${{ secrets.GH_PACKAGES_TOKEN }}
+          token: ${{ secrets.GH_PACKAGES_TOKEN || github.token }}
           sparse-checkout: .github/scripts/review-pipeline
           sparse-checkout-cone-mode: false
       - name: Run review pipeline
