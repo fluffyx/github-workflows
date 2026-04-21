@@ -1,4 +1,4 @@
-name: Review Pipeline
+name: Request Charlie Review
 
 on:
   workflow_call:
