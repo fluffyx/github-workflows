@@ -15,20 +15,17 @@ jobs:
       has_frontends: ${{ steps.find.outputs.has_frontends }}
     steps:
       - uses: actions/checkout@v6
-        with:
-          sparse-checkout: " "
-          sparse-checkout-cone-mode: true
 
       - name: Find frontend directories
         id: find
         run: |
-          git sparse-checkout set --no-cone 'frontend*/'
-          dirs=$(ls -d frontend frontend-* 2>/dev/null | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          echo "dirs=$dirs" >> "$GITHUB_OUTPUT"
-          if [ "$dirs" = "[]" ]; then
+          dirs=$(ls -d frontend frontend-* 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+          if [ -z "$dirs" ]; then
             echo "has_frontends=false" >> "$GITHUB_OUTPUT"
+            echo "dirs=[]" >> "$GITHUB_OUTPUT"
           else
             echo "has_frontends=true" >> "$GITHUB_OUTPUT"
+            echo "dirs=[$(echo "$dirs" | sed 's/[^,]*/"&"/g')]" >> "$GITHUB_OUTPUT"
           fi
 
   scan_ruby:
