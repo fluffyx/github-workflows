@@ -106,6 +106,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Sync
+        run: pnpm exec svelte-kit sync
+        continue-on-error: true
+
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 
@@ -117,7 +121,7 @@ jobs:
       - name: Run Playwright tests
         run: |
           pnpm exec vite preview --port 5174 --strictPort &
-          sleep 2
+          npx wait-on http://localhost:5174 --timeout 30000
           pnpm exec playwright test
 
       - name: Upload test report
