@@ -86,7 +86,11 @@ runs:
           fi
         done
 
-        mapfile -t headings < <(printf '%s\n' "${raw_headings[@]}" | sed 's/^v//')
+        if [ ${#raw_headings[@]} -gt 0 ]; then
+          mapfile -t headings < <(printf '%s\n' "${raw_headings[@]}" | sed 's/^v//')
+        else
+          headings=()
+        fi
 
         for h in "${headings[@]}"; do
           if [[ ! "$h" =~ $semver_re ]]; then
