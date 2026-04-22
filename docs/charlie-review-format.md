@@ -28,7 +28,7 @@ First match wins:
 6. `"No issues found"` or `"looks correct"` or `"bump looks safe"` in body → **CLEAN**
 7. Empty body → **CLEAN**
 
-For gating purposes, categories 1–3 are blocking (fail the check), and 4–7 are non-blocking (pass the check).
+For check-run purposes, categories 1-4 are failures. Non-blocking feedback still means Charlie found actionable follow-up, so only clean and empty reviews pass the check.
 
 ## Body formats
 

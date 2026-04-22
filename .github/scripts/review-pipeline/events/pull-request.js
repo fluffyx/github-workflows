@@ -6,6 +6,7 @@ async function handlePullRequest({ helpers, context }) {
 
   await helpers.removePresentLabels(pr.number, labels, ALL_LABELS);
   await helpers.requestCharlieReview(pr.number);
+  await helpers.createPendingCheck(pr.head.sha);
 }
 
 module.exports = { handlePullRequest };

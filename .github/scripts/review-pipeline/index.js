@@ -1,19 +1,19 @@
 const { createHelpers } = require('./github-helpers.js');
 const { handlePullRequest } = require('./events/pull-request.js');
-// Greptile/Macroscope pipeline disabled — only Charlie auto-request is active.
+const { handlePullRequestReview } = require('./events/pull-request-review.js');
+// Greptile/Macroscope check-run and comment handlers are disabled.
 // Uncomment these handlers to re-enable the full review pipeline.
-// const { handlePullRequestReview } = require('./events/pull-request-review.js');
 // const { handleCheckRun } = require('./events/check-run.js');
 // const { handleIssueComment } = require('./events/issue-comment.js');
 
 const HANDLERS = {
   pull_request: handlePullRequest,
-  // pull_request_review: handlePullRequestReview,
+  pull_request_review: handlePullRequestReview,
   // check_run: handleCheckRun,
   // issue_comment: handleIssueComment,
 };
 
-async function run({ github, context, core }) {
+async function run({ github, context, core, options = {} }) {
   const helpers = createHelpers({ github, context, core });
   await helpers.ensureRepoLabels();
 
@@ -24,7 +24,7 @@ async function run({ github, context, core }) {
     return;
   }
 
-  await handler({ helpers, context });
+  await handler({ helpers, context, options });
 }
 
 module.exports = { run };

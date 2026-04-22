@@ -2,9 +2,15 @@ name: Request Charlie Review
 
 on:
   workflow_call:
+    inputs:
+      greptile:
+        description: Auto-trigger Greptile review after Charlie approves
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+  checks: write
   issues: write
   pull-requests: write
 
@@ -30,7 +36,10 @@ jobs:
           sparse-checkout-cone-mode: false
       - name: Run review pipeline
         uses: actions/github-script@v8
+        env:
+          INPUT_GREPTILE: ${{ inputs.greptile }}
         with:
           script: |
             const { run } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/review-pipeline/index.js`);
-            await run({ github, context, core });
+            const options = { greptile: process.env.INPUT_GREPTILE === 'true' };
+            await run({ github, context, core, options });

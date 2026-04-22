@@ -79,7 +79,7 @@ jobs:
 
 ## Review Pipeline
 
-Prepares PR state labels, clears previous review-pipeline labels on each new PR push, and requests a review from the `CharlieHelps` GitHub user.
+Prepares PR state labels, clears previous review-pipeline labels on each new PR push, requests a review from the `CharlieHelps` GitHub user, and keeps a `charliecreates` check pending until Charlie reviews the latest commit.
 
 ### Caller example
 
@@ -88,15 +88,26 @@ name: Charlie Review
 on:
   pull_request:
     types: [opened, reopened, synchronize]
+  pull_request_review:
+    types: [submitted]
 permissions:
   contents: read
+  checks: write
   issues: write
   pull-requests: write
 jobs:
   review:
     uses: fluffyx/github-workflows/.github/workflows/charlie-review.yml@main
     secrets: inherit
+    with:
+      greptile: true  # optional — auto-trigger Greptile after clean Charlie review
 ```
+
+### Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `greptile` | `boolean` | `false` | Auto-trigger Greptile review after Charlie gives a clean review |
 
 ## Version sync check
 
