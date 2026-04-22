@@ -26,13 +26,13 @@ These workflows delegate to bin scripts in your repo. Each repo decides what "ch
 
 ### Multi-frontend repos
 
-For repos with multiple frontend directories (`frontend/`, `frontend-admin/`, etc.), `bin/check`, `bin/test-frontend`, and `bin/audit-frontend` should iterate over all of them internally.
+Rails apps use `frontend*/` directories at the repo root (e.g. `frontend/`, `frontend-book/`). The shared workflow installs dependencies per-directory automatically — no root `package.json` or `pnpm-lock.yaml` needed. `bin/check`, `bin/test-frontend`, and `bin/audit-frontend` should iterate over all `frontend*/` directories internally.
 
 ## CI (Rails)
 
 Full CI for Rails apps that may include one or more SvelteKit frontends.
 
-**Jobs:** `scan_ruby`, `lint` (RuboCop), `test` (RSpec + Postgres), `audit_frontend`, `check_frontend`, `test_frontend`. The frontend jobs are skipped automatically if no `frontend/` or `frontend-*` directories exist.
+**Jobs:** `check-version`, `scan_ruby`, `lint` (RuboCop), `test` (RSpec + Postgres), `pack` (gem build dry-run, skips if no gemspec), `audit_frontend`, `check_frontend`, `test_frontend`. The frontend jobs are skipped automatically if no `frontend/` or `frontend-*` directories exist.
 
 ### Caller example
 
@@ -52,7 +52,7 @@ jobs:
 
 CI for standalone frontend or component library repos (e.g. fx-glass).
 
-**Jobs:** `check` (runs `bin/check`), `build-and-test`, and optionally `e2e` (Playwright).
+**Jobs:** `check-version`, `audit` (pnpm audit), `check` (runs `bin/check`), `build-and-test` (build + pack dry-run + tests), and optionally `e2e` (Playwright).
 
 ### Caller example
 
@@ -103,12 +103,44 @@ jobs:
 Both CI workflows automatically run a version sync check (`check-version` job). It:
 
 - **Requires** `CHANGELOG.md` to exist
-- **Auto-discovers** version sources: `VERSION` file, `package.json` (version field), `version.rb`
-- **Fails** if any discovered versions disagree with each other
-- **Fails** if the latest CHANGELOG heading is a version that doesn't match the discovered version
+- **Auto-discovers** version sources: `VERSION` file, root `package.json` (version field), `version.rb`
+- **Auto-detects** changelog format from headings — either semver (`## [1.2.3]`) or date (`## [2026-04-12]`)
+- **Fails** if changelog mixes semver and date headings
 - **Passes** if the latest CHANGELOG heading is `[Unreleased]` (acceptable on branches)
 
-No configuration needed — it runs automatically for all repos using these workflows.
+### Semver changelogs (libraries)
+
+- **Validates** all discovered versions are valid semver (`MAJOR.MINOR.PATCH`)
+- **Fails** if any discovered versions disagree with each other
+- **Fails** if the latest CHANGELOG heading is a version that doesn't match the discovered version
+- **Fails** if any CHANGELOG heading uses a `v` prefix (use `## [0.6.1]`, not `## v0.6.1`)
+- **Fails** if CHANGELOG version headings are out of descending semver order
+
+### Date changelogs (apps)
+
+- **Validates** headings are ISO 8601 dates (`YYYY-MM-DD`)
+- **Fails** if dates are out of descending order
+- **Skips** version cross-reference (apps typically have no version files to compare)
+
+No configuration needed — it runs automatically for all repos using these workflows. The format is detected from your existing headings.
+
+## Dependency audit
+
+Both workflows run `pnpm audit` (hard-fail). To ignore an unfixable CVE, add it to `pnpm.auditConfig.ignoreCves` in your `package.json`.
+
+## Pack dry-run
+
+- **ci-frontend.yml**: runs `pnpm pack && tar tf *.tgz` after build to verify the package is publishable
+- **ci-rails.yml**: runs `gem build *.gemspec` if a gemspec exists (skips for Rails apps)
+
+## Test coverage
+
+Both workflows pass `COVERAGE=true` to test steps. To use it, configure thresholds in your repo's test config:
+
+- **Vitest**: add `coverage.thresholds` in `vitest.config.ts` (requires `@vitest/coverage-v8`)
+- **SimpleCov**: check `ENV["COVERAGE"]` in `spec_helper.rb`
+
+No artifacts are uploaded — coverage enforcement is local to each repo via threshold gates.
 
 ## Conventions
 

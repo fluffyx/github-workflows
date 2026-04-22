@@ -104,6 +104,32 @@ jobs:
 
       - name: RSpec
         run: bundle exec rspec
+        env:
+          COVERAGE: "true"
+
+  pack:
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
+      - name: Gem build dry-run
+        run: |
+          found=false
+          for gemspec in *.gemspec; do
+            [ -f "$gemspec" ] || continue
+            found=true
+            echo "==> Building $gemspec"
+            gem build "$gemspec"
+          done
+          if [ "$found" = false ]; then
+            echo "No gemspec found — skipping"
+          fi
 
   audit_frontend:
     needs: discover_frontends
@@ -122,6 +148,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: frontend*/pnpm-lock.yaml
           registry-url: https://npm.pkg.github.com
 
       - name: Configure GitHub Packages auth
@@ -130,7 +157,13 @@ jobs:
           printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
           echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install frontend dependencies
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            echo "==> Installing $dir"
+            pnpm --dir "$dir" install --frozen-lockfile
+          done
 
       - name: Audit
         run: bin/audit-frontend
@@ -152,6 +185,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: frontend*/pnpm-lock.yaml
           registry-url: https://npm.pkg.github.com
 
       - name: Configure GitHub Packages auth
@@ -160,7 +194,13 @@ jobs:
           printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
           echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install frontend dependencies
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            echo "==> Installing $dir"
+            pnpm --dir "$dir" install --frozen-lockfile
+          done
 
       - name: Check
         run: bin/check
@@ -182,6 +222,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: frontend*/pnpm-lock.yaml
           registry-url: https://npm.pkg.github.com
 
       - name: Configure GitHub Packages auth
@@ -190,7 +231,15 @@ jobs:
           printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
           echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install frontend dependencies
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            echo "==> Installing $dir"
+            pnpm --dir "$dir" install --frozen-lockfile
+          done
 
       - name: Test
         run: bin/test-frontend
+        env:
+          COVERAGE: "true"
