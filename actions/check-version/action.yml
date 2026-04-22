@@ -55,7 +55,7 @@ runs:
         done < <(find . -name package.json -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/frontend*/*' | sort)
 
         while IFS= read -r vr; do
-          v=$(grep -oP 'VERSION\s*=\s*["\x27]\K[^"\x27]+' "$vr" 2>/dev/null || true)
+          v=$(grep -m1 -oP 'VERSION\s*=\s*["\x27]\K[^"\x27]+' "$vr" 2>/dev/null || true)
           if [ -n "$v" ]; then
             if [[ ! "$v" =~ $semver_re ]]; then
               errors+=("$vr has invalid semver: $v")
@@ -214,11 +214,11 @@ runs:
 
         # --- Check for empty changelog entries ---
         empty_sections=$(awk '
-          /^## / {
+          /^##[[:space:]]/ {
             if (heading != "" && content == 0) print heading
             heading = $0; content = 0; next
           }
-          heading != "" && /[^ \t]/ { content = 1 }
+          heading != "" && /[^ \t]/ && !/^#/ { content = 1 }
         END {
           if (heading != "" && content == 0) print heading
         }' CHANGELOG.md | grep -iv 'unreleased' || true)
