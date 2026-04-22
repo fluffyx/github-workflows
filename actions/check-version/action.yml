@@ -3,6 +3,7 @@ description: >
   Auto-discovers version-bearing files (VERSION, package.json, version.rb)
   and verifies they agree. Requires CHANGELOG.md to exist. If the latest
   CHANGELOG heading is a version (not [Unreleased]), it must match.
+  Verifies CHANGELOG versions are in descending semver order.
 
 runs:
   using: composite
@@ -79,6 +80,19 @@ runs:
               echo "CHANGELOG.md matches version: $changelog_version"
             fi
           fi
+        fi
+
+        # --- Check CHANGELOG ordering ---
+        mapfile -t headings < <(grep -oP '^##\s+\[?\K[^\]\s—–-]+' CHANGELOG.md | grep -iv '^unreleased' | sed 's/^v//')
+        if [ ${#headings[@]} -ge 2 ]; then
+          for ((i=0; i<${#headings[@]}-1; i++)); do
+            a="${headings[$i]}"
+            b="${headings[$((i+1))]}"
+            higher=$(printf '%s\n%s\n' "$a" "$b" | sort -t. -k1,1nr -k2,2nr -k3,3nr -k4,4nr | head -1)
+            if [ "$higher" != "$a" ]; then
+              errors+=("CHANGELOG.md is out of order: $a appears before $b but $b is a higher version")
+            fi
+          done
         fi
 
         # --- Report ---
