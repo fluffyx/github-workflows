@@ -55,7 +55,7 @@ runs:
         done < <(find . -name package.json -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/frontend*/*' | sort)
 
         while IFS= read -r vr; do
-          v=$(grep -oP 'VERSION\s*=\s*["\x27]\K[^"\x27]+' "$vr" 2>/dev/null || true)
+          v=$(grep -m1 -oP 'VERSION\s*=\s*["\x27]\K[^"\x27]+' "$vr" 2>/dev/null || true)
           if [ -n "$v" ]; then
             if [[ ! "$v" =~ $semver_re ]]; then
               errors+=("$vr has invalid semver: $v")
@@ -79,8 +79,22 @@ runs:
           done
         fi
 
+        # --- Check [Unreleased] position ---
+        mapfile -t all_headings < <(grep -oP '^##\s+\[?\K[^\]\s—–]+' CHANGELOG.md)
+        for i in "${!all_headings[@]}"; do
+          if echo "${all_headings[$i]}" | grep -qi '^unreleased'; then
+            if [ "$i" -ne 0 ]; then
+              errors+=("[Unreleased] must be the first heading in CHANGELOG.md, but it appears at position $((i+1))")
+            fi
+          fi
+        done
+
         # --- Check CHANGELOG headings ---
-        mapfile -t raw_headings < <(grep -oP '^##\s+\[?\K[^\]\s—–]+' CHANGELOG.md | grep -iv '^unreleased')
+        if [ ${#all_headings[@]} -gt 0 ]; then
+          mapfile -t raw_headings < <(printf '%s\n' "${all_headings[@]}" | grep -iv '^unreleased')
+        else
+          raw_headings=()
+        fi
 
         for h in "${raw_headings[@]}"; do
           if [[ "$h" =~ ^v ]]; then
@@ -196,6 +210,23 @@ runs:
               fi
             done
           fi
+        fi
+
+        # --- Check for empty changelog entries ---
+        empty_sections=$(awk '
+          /^##[[:space:]]/ {
+            if (heading != "" && content == 0) print heading
+            heading = $0; content = 0; next
+          }
+          heading != "" && /[^ \t]/ && !/^#/ { content = 1 }
+        END {
+          if (heading != "" && content == 0) print heading
+        }' CHANGELOG.md | grep -iv 'unreleased' || true)
+
+        if [ -n "$empty_sections" ]; then
+          while IFS= read -r section; do
+            errors+=("CHANGELOG.md has empty section: $section")
+          done <<< "$empty_sections"
         fi
 
         # --- Report ---
