@@ -104,6 +104,32 @@ jobs:
 
       - name: RSpec
         run: bundle exec rspec
+        env:
+          COVERAGE: "true"
+
+  pack:
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
+      - name: Gem build dry-run
+        run: |
+          found=false
+          for gemspec in *.gemspec; do
+            [ -f "$gemspec" ] || continue
+            found=true
+            echo "==> Building $gemspec"
+            gem build "$gemspec"
+          done
+          if [ "$found" = false ]; then
+            echo "No gemspec found — skipping"
+          fi
 
   audit_frontend:
     needs: discover_frontends
@@ -194,3 +220,5 @@ jobs:
 
       - name: Test
         run: bin/test-frontend
+        env:
+          COVERAGE: "true"

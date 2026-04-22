@@ -32,7 +32,7 @@ For repos with multiple frontend directories (`frontend/`, `frontend-admin/`, et
 
 Full CI for Rails apps that may include one or more SvelteKit frontends.
 
-**Jobs:** `scan_ruby`, `lint` (RuboCop), `test` (RSpec + Postgres), `audit_frontend`, `check_frontend`, `test_frontend`. The frontend jobs are skipped automatically if no `frontend/` or `frontend-*` directories exist.
+**Jobs:** `check-version`, `scan_ruby`, `lint` (RuboCop), `test` (RSpec + Postgres), `pack` (gem build dry-run, skips if no gemspec), `audit_frontend`, `check_frontend`, `test_frontend`. The frontend jobs are skipped automatically if no `frontend/` or `frontend-*` directories exist.
 
 ### Caller example
 
@@ -52,7 +52,7 @@ jobs:
 
 CI for standalone frontend or component library repos (e.g. fx-glass).
 
-**Jobs:** `check` (runs `bin/check`), `build-and-test`, and optionally `e2e` (Playwright).
+**Jobs:** `check-version`, `audit` (pnpm audit), `check` (runs `bin/check`), `build-and-test` (build + pack dry-run + tests), and optionally `e2e` (Playwright).
 
 ### Caller example
 
@@ -112,6 +112,24 @@ Both CI workflows automatically run a version sync check (`check-version` job). 
 - **Passes** if the latest CHANGELOG heading is `[Unreleased]` (acceptable on branches)
 
 No configuration needed — it runs automatically for all repos using these workflows.
+
+## Dependency audit
+
+Both workflows run `pnpm audit` (hard-fail). To ignore an unfixable CVE, add it to `pnpm.auditConfig.ignoreCves` in your `package.json`.
+
+## Pack dry-run
+
+- **ci-frontend.yml**: runs `pnpm pack && tar tf *.tgz` after build to verify the package is publishable
+- **ci-rails.yml**: runs `gem build *.gemspec` if a gemspec exists (skips for Rails apps)
+
+## Test coverage
+
+Both workflows pass `COVERAGE=true` to test steps. To use it, configure thresholds in your repo's test config:
+
+- **Vitest**: add `coverage.thresholds` in `vitest.config.ts` (requires `@vitest/coverage-v8`)
+- **SimpleCov**: check `ENV["COVERAGE"]` in `spec_helper.rb`
+
+No artifacts are uploaded — coverage enforcement is local to each repo via threshold gates.
 
 ## Conventions
 
