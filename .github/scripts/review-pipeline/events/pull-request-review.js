@@ -20,12 +20,20 @@ function classifyReview(body) {
     return { conclusion: 'failure', label: 'non-blocking' };
   }
 
-  if (
-    text.includes('actionable') ||
-    text.includes('No issues found') ||
-    text.includes('looks correct') ||
-    text.includes('bump looks safe')
-  ) {
+  const cleanPhrases = [
+    "don't have actionable",
+    'dont have actionable',
+    'do not have actionable',
+    "don't have additional actionable",
+    'dont have additional actionable',
+    'do not have additional actionable',
+    "don't see actionable",
+    'No issues found',
+    'looks correct',
+    'bump looks safe',
+  ];
+
+  if (cleanPhrases.some((phrase) => text.includes(phrase))) {
     return { conclusion: 'success', label: 'clean' };
   }
 
@@ -86,6 +94,8 @@ async function handlePullRequestReview({ helpers, context, options = {} }) {
 
   if (classification.label !== 'clean') {
     core.info(`Charlie review classified as ${classification.label}; marking check as failure`);
+    const labels = await helpers.listLabels(pr.number);
+    await helpers.removePresentLabels(pr.number, labels, [LABELS.charlieDone]);
     return;
   }
 

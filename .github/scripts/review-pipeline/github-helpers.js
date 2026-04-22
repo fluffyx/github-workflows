@@ -186,9 +186,16 @@ function createHelpers({ github, context, core }) {
       check_name: CHARLIE_CHECK_NAME,
       per_page: 100,
     });
-    const existing = checkRuns.find(
-      (checkRun) => checkRun.name === CHARLIE_CHECK_NAME && checkRun.head_sha === headSha,
-    );
+    const existing =
+      checkRuns.find(
+        (checkRun) =>
+          checkRun.name === CHARLIE_CHECK_NAME &&
+          checkRun.head_sha === headSha &&
+          checkRun.status === 'in_progress',
+      ) ??
+      checkRuns.find(
+        (checkRun) => checkRun.name === CHARLIE_CHECK_NAME && checkRun.head_sha === headSha,
+      );
     const payload = {
       owner,
       repo,

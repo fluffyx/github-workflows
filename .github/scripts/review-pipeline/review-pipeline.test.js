@@ -86,6 +86,31 @@ test('completeCheck updates the existing charliecreates check run for the head S
   assert.match(updated[0].completed_at, /^\d{4}-\d{2}-\d{2}T/);
 });
 
+test('completeCheck prefers an in-progress charliecreates check run for the head SHA', async () => {
+  const updated = [];
+  const helpers = createHelpers({
+    github: {
+      rest: {
+        checks: {
+          listForRef: async () => {},
+          update: async (params) => updated.push(params),
+        },
+      },
+      paginate: async () => [
+        { id: 41, name: 'charliecreates', head_sha: 'abc123', status: 'completed' },
+        { id: 42, name: 'charliecreates', head_sha: 'abc123', status: 'in_progress' },
+      ],
+    },
+    context: { repo: { owner: 'fluffyx', repo: 'demo' } },
+    core: createCore(),
+  });
+
+  await helpers.completeCheck('abc123', 'success', 'No actionable feedback found.');
+
+  assert.equal(updated.length, 1);
+  assert.equal(updated[0].check_run_id, 42);
+});
+
 test('handlePullRequest requests Charlie and creates a pending check for the latest head', async () => {
   const calls = [];
   const helpers = {
@@ -138,7 +163,11 @@ test('classifyReview treats blocking and non-blocking Charlie feedback as failur
 test('classifyReview treats clean Charlie review bodies as success', () => {
   for (const body of [
     '',
+    "Reviewed the latest changes, and I don't have actionable feedback to address.",
+    'Reviewed the latest changes, and I dont have actionable feedback to address.',
     'Reviewed the latest changes, and I do not have actionable feedback to address.',
+    "I don't have additional actionable feedback.",
+    "I don't see actionable issues in this diff.",
     'No issues found in the changes shown.',
     'Reviewed - this plan change looks correct.',
     'Dependency bump looks safe: patch-only release.',
@@ -152,15 +181,21 @@ test('classifyReview fails safe on unknown review formats', () => {
     conclusion: 'failure',
     label: 'unclassified',
   });
+  assert.deepEqual(classifyReview('There are actionable items to address.'), {
+    conclusion: 'failure',
+    label: 'unclassified',
+  });
 });
 
 test('handlePullRequestReview completes a current-head non-blocking review as failure without marking Charlie done', async () => {
   const completed = [];
   const labelsAdded = [];
+  const labelsRemoved = [];
   const helpers = {
     core: createCore(),
     completeCheck: async (...args) => completed.push(args),
     listLabels: async () => new Set(),
+    removePresentLabels: async (number, labels, names) => labelsRemoved.push([number, names]),
     addMissingLabels: async (number, labels, names) => labelsAdded.push(names),
     getUnresolvedThreadCount: async () => 0,
   };
@@ -185,6 +220,43 @@ test('handlePullRequestReview completes a current-head non-blocking review as fa
   assert.equal(completed[0][1], 'failure');
   assert.match(completed[0][2], /Non-blocking feedback/);
   assert.deepEqual(labelsAdded, []);
+  assert.deepEqual(labelsRemoved, [[7, [LABELS.charlieDone]]]);
+});
+
+test('handlePullRequestReview removes stale Charlie done label for a current-head non-clean review', async () => {
+  const completed = [];
+  const labelsRemoved = [];
+  const helpers = {
+    core: createCore(),
+    completeCheck: async (...args) => completed.push(args),
+    listLabels: async () => new Set([LABELS.charlieDone]),
+    removePresentLabels: async (number, labels, names) =>
+      labelsRemoved.push([number, names, labels.has(LABELS.charlieDone)]),
+    addMissingLabels: async () => {
+      throw new Error('should not add labels for failing Charlie reviews');
+    },
+    getUnresolvedThreadCount: async () => {
+      throw new Error('should not check unresolved threads for failing Charlie reviews');
+    },
+  };
+
+  await handlePullRequestReview({
+    helpers,
+    context: {
+      payload: {
+        pull_request: { number: 7, draft: false, head: { sha: 'abc123' } },
+        review: {
+          user: { login: 'charliecreates[bot]' },
+          state: 'commented',
+          commit_id: 'abc123',
+          body: '### Blocking feedback\n1. Fix this.',
+        },
+      },
+    },
+  });
+
+  assert.equal(completed.length, 1);
+  assert.deepEqual(labelsRemoved, [[7, [LABELS.charlieDone], true]]);
 });
 
 test('handlePullRequestReview completes a clean commented review as success and marks Charlie done', async () => {

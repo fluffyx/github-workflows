@@ -8,7 +8,7 @@ Every PR review body falls into one of these categories:
 
 | Category | Count* | Signal |
 |----------|--------|--------|
-| **Clean** | 81 | Body contains `"actionable"` without blocking/non-blocking sections |
+| **Clean** | 81 | Body contains a known negated actionable phrase or approval phrase |
 | **Blocking** | 60 | Body contains `### Blocking feedback` |
 | **Non-blocking** | 22 | Body contains `Non-blocking feedback` summary without blocking section |
 | **Blocking + non-blocking** | 5 | Both markers present |
@@ -24,9 +24,16 @@ First match wins:
 2. `"### Blocking feedback"` in body → **BLOCKING**
 3. `"Blocking issue:"` in body → **BLOCKING** (rare variant)
 4. `"Non-blocking feedback"` in body → **NON-BLOCKING**
-5. `"actionable"` in body → **CLEAN**
-6. `"No issues found"` or `"looks correct"` or `"bump looks safe"` in body → **CLEAN**
-7. Empty body → **CLEAN**
+5. Empty body → **CLEAN**
+6. Known negated actionable phrase in body → **CLEAN**
+   - `"don't have actionable"`
+   - `"dont have actionable"`
+   - `"do not have actionable"`
+   - `"don't have additional actionable"`
+   - `"dont have additional actionable"`
+   - `"do not have additional actionable"`
+   - `"don't see actionable"`
+7. `"No issues found"` or `"looks correct"` or `"bump looks safe"` in body → **CLEAN**
 
 For check-run purposes, categories 1-4 are failures. Non-blocking feedback still means Charlie found actionable follow-up, so only clean and empty reviews pass the check.
 
