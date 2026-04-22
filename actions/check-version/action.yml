@@ -212,6 +212,23 @@ runs:
           fi
         fi
 
+        # --- Check for empty changelog entries ---
+        empty_sections=$(awk '
+          /^## / {
+            if (heading != "" && content == 0) print heading
+            heading = $0; content = 0; next
+          }
+          heading != "" && /[^ \t]/ { content = 1 }
+        END {
+          if (heading != "" && content == 0) print heading
+        }' CHANGELOG.md | grep -iv 'unreleased' || true)
+
+        if [ -n "$empty_sections" ]; then
+          while IFS= read -r section; do
+            errors+=("CHANGELOG.md has empty section: $section")
+          done <<< "$empty_sections"
+        fi
+
         # --- Report ---
         if [ ${#errors[@]} -gt 0 ]; then
           for err in "${errors[@]}"; do
