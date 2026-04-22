@@ -3,7 +3,8 @@ description: >
   Auto-discovers version-bearing files (VERSION, package.json, version.rb)
   and verifies they agree. Requires CHANGELOG.md to exist. If the latest
   CHANGELOG heading is a version (not [Unreleased]), it must match.
-  Verifies CHANGELOG versions are in descending semver order.
+  Validates semver format, rejects v-prefixes in changelogs, and verifies
+  descending version order.
 
 runs:
   using: composite
@@ -12,6 +13,8 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+
+        semver_re='^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'
 
         errors=()
 
@@ -27,26 +30,38 @@ runs:
 
         if [ -f VERSION ]; then
           v=$(tr -d '[:space:]' < VERSION)
-          versions+=("$v")
-          sources+=("VERSION")
-          echo "Found VERSION: $v"
+          if [[ ! "$v" =~ $semver_re ]]; then
+            errors+=("VERSION file has invalid semver: $v")
+          else
+            versions+=("$v")
+            sources+=("VERSION")
+            echo "Found VERSION: $v"
+          fi
         fi
 
         while IFS= read -r pj; do
           v=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('version',''))" "$pj" 2>/dev/null || true)
           if [ -n "$v" ]; then
-            versions+=("$v")
-            sources+=("$pj")
-            echo "Found $pj: $v"
+            if [[ ! "$v" =~ $semver_re ]]; then
+              errors+=("$pj has invalid semver: $v")
+            else
+              versions+=("$v")
+              sources+=("$pj")
+              echo "Found $pj: $v"
+            fi
           fi
         done < <(find . -name package.json -not -path '*/node_modules/*' -not -path '*/.git/*' | sort)
 
         while IFS= read -r vr; do
           v=$(grep -oP 'VERSION\s*=\s*["\x27]\K[^"\x27]+' "$vr" 2>/dev/null || true)
           if [ -n "$v" ]; then
-            versions+=("$v")
-            sources+=("$vr")
-            echo "Found $vr: $v"
+            if [[ ! "$v" =~ $semver_re ]]; then
+              errors+=("$vr has invalid semver: $v")
+            else
+              versions+=("$v")
+              sources+=("$vr")
+              echo "Found $vr: $v"
+            fi
           fi
         done < <(find . -name version.rb -not -path '*/node_modules/*' -not -path '*/.git/*' | sort)
 
@@ -62,7 +77,24 @@ runs:
           done
         fi
 
-        # --- Check CHANGELOG version ---
+        # --- Check CHANGELOG headings ---
+        mapfile -t raw_headings < <(grep -oP '^##\s+\[?\K[^\]\s—–-]+' CHANGELOG.md | grep -iv '^unreleased')
+
+        for h in "${raw_headings[@]}"; do
+          if [[ "$h" =~ ^v ]]; then
+            errors+=("CHANGELOG.md uses v-prefix in heading: $h — use bare version numbers (e.g. 0.6.1)")
+          fi
+        done
+
+        mapfile -t headings < <(printf '%s\n' "${raw_headings[@]}" | sed 's/^v//')
+
+        for h in "${headings[@]}"; do
+          if [[ ! "$h" =~ $semver_re ]]; then
+            errors+=("CHANGELOG.md has invalid semver in heading: $h")
+          fi
+        done
+
+        # --- Check latest CHANGELOG version matches ---
         if [ ${#versions[@]} -gt 0 ]; then
           canonical="${versions[0]}"
           latest_heading=$(grep -m1 -oP '^##\s+\[?\K[^\]]+' CHANGELOG.md || true)
@@ -73,9 +105,8 @@ runs:
             echo "Latest CHANGELOG heading is [Unreleased] — OK"
           else
             changelog_version="${latest_heading#v}"
-            compare_version="${canonical#v}"
-            if [ "$changelog_version" != "$compare_version" ]; then
-              errors+=("CHANGELOG.md latest version is $changelog_version but version files say $compare_version")
+            if [ "$changelog_version" != "$canonical" ]; then
+              errors+=("CHANGELOG.md latest version is $changelog_version but version files say $canonical")
             else
               echo "CHANGELOG.md matches version: $changelog_version"
             fi
@@ -83,11 +114,17 @@ runs:
         fi
 
         # --- Check CHANGELOG ordering ---
-        mapfile -t headings < <(grep -oP '^##\s+\[?\K[^\]\s—–-]+' CHANGELOG.md | grep -iv '^unreleased' | sed 's/^v//')
-        if [ ${#headings[@]} -ge 2 ]; then
-          for ((i=0; i<${#headings[@]}-1; i++)); do
-            a="${headings[$i]}"
-            b="${headings[$((i+1))]}"
+        valid_headings=()
+        for h in "${headings[@]}"; do
+          if [[ "$h" =~ $semver_re ]]; then
+            valid_headings+=("$h")
+          fi
+        done
+
+        if [ ${#valid_headings[@]} -ge 2 ]; then
+          for ((i=0; i<${#valid_headings[@]}-1; i++)); do
+            a="${valid_headings[$i]}"
+            b="${valid_headings[$((i+1))]}"
             higher=$(printf '%s\n%s\n' "$a" "$b" | sort -t. -k1,1nr -k2,2nr -k3,3nr -k4,4nr | head -1)
             if [ "$higher" != "$a" ]; then
               errors+=("CHANGELOG.md is out of order: $a appears before $b but $b is a higher version")

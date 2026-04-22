@@ -104,10 +104,12 @@ Both CI workflows automatically run a version sync check (`check-version` job). 
 
 - **Requires** `CHANGELOG.md` to exist
 - **Auto-discovers** version sources: `VERSION` file, `package.json` (version field), `version.rb`
+- **Validates** all discovered versions are valid semver (`1.2.3` or `1.2.3.4`)
 - **Fails** if any discovered versions disagree with each other
 - **Fails** if the latest CHANGELOG heading is a version that doesn't match the discovered version
-- **Passes** if the latest CHANGELOG heading is `[Unreleased]` (acceptable on branches)
+- **Fails** if any CHANGELOG heading uses a `v` prefix (use `## [0.6.1]`, not `## v0.6.1`)
 - **Fails** if CHANGELOG version headings are out of descending semver order
+- **Passes** if the latest CHANGELOG heading is `[Unreleased]` (acceptable on branches)
 
 No configuration needed — it runs automatically for all repos using these workflows.
 
