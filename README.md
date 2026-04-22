@@ -98,6 +98,18 @@ jobs:
     secrets: inherit
 ```
 
+## Version sync check
+
+Both CI workflows automatically run a version sync check (`check-version` job). It:
+
+- **Requires** `CHANGELOG.md` to exist
+- **Auto-discovers** version sources: `VERSION` file, `package.json` (version field), `version.rb`
+- **Fails** if any discovered versions disagree with each other
+- **Fails** if the latest CHANGELOG heading is a version that doesn't match the discovered version
+- **Passes** if the latest CHANGELOG heading is `[Unreleased]` (acceptable on branches)
+
+No configuration needed — it runs automatically for all repos using these workflows.
+
 ## Conventions
 
 - **Node 22, pnpm 10** — hardcoded in the shared workflows. Bump here to update all consumers.
