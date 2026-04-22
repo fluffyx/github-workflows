@@ -1,0 +1,92 @@
+name: Check version sync
+description: >
+  Auto-discovers version-bearing files (VERSION, package.json, version.rb)
+  and verifies they agree. Requires CHANGELOG.md to exist. If the latest
+  CHANGELOG heading is a version (not [Unreleased]), it must match.
+
+runs:
+  using: composite
+  steps:
+    - name: Check version sync
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        errors=()
+
+        # --- Require CHANGELOG.md ---
+        if [ ! -f CHANGELOG.md ]; then
+          echo "::error::CHANGELOG.md is missing"
+          exit 1
+        fi
+
+        # --- Auto-discover version sources ---
+        versions=()
+        sources=()
+
+        if [ -f VERSION ]; then
+          v=$(tr -d '[:space:]' < VERSION)
+          versions+=("$v")
+          sources+=("VERSION")
+          echo "Found VERSION: $v"
+        fi
+
+        while IFS= read -r pj; do
+          v=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('version',''))" "$pj" 2>/dev/null || true)
+          if [ -n "$v" ]; then
+            versions+=("$v")
+            sources+=("$pj")
+            echo "Found $pj: $v"
+          fi
+        done < <(find . -name package.json -not -path '*/node_modules/*' -not -path '*/.git/*' | sort)
+
+        while IFS= read -r vr; do
+          v=$(grep -oP 'VERSION\s*=\s*["\x27]\K[^"\x27]+' "$vr" 2>/dev/null || true)
+          if [ -n "$v" ]; then
+            versions+=("$v")
+            sources+=("$vr")
+            echo "Found $vr: $v"
+          fi
+        done < <(find . -name version.rb -not -path '*/node_modules/*' -not -path '*/.git/*' | sort)
+
+        # --- Compare all discovered versions ---
+        if [ ${#versions[@]} -eq 0 ]; then
+          echo "No version sources found — skipping version comparison"
+        else
+          canonical="${versions[0]}"
+          for i in "${!versions[@]}"; do
+            if [ "${versions[$i]}" != "$canonical" ]; then
+              errors+=("Version mismatch: ${sources[0]} has $canonical but ${sources[$i]} has ${versions[$i]}")
+            fi
+          done
+        fi
+
+        # --- Check CHANGELOG version ---
+        if [ ${#versions[@]} -gt 0 ]; then
+          canonical="${versions[0]}"
+          latest_heading=$(grep -m1 -oP '^##\s+\[?\K[^\]]+' CHANGELOG.md || true)
+
+          if [ -z "$latest_heading" ]; then
+            errors+=("CHANGELOG.md has no version headings")
+          elif echo "$latest_heading" | grep -qi '^unreleased'; then
+            echo "Latest CHANGELOG heading is [Unreleased] — OK"
+          else
+            changelog_version="${latest_heading#v}"
+            compare_version="${canonical#v}"
+            if [ "$changelog_version" != "$compare_version" ]; then
+              errors+=("CHANGELOG.md latest version is $changelog_version but version files say $compare_version")
+            else
+              echo "CHANGELOG.md matches version: $changelog_version"
+            fi
+          fi
+        fi
+
+        # --- Report ---
+        if [ ${#errors[@]} -gt 0 ]; then
+          for err in "${errors[@]}"; do
+            echo "::error::$err"
+          done
+          exit 1
+        fi
+
+        echo "Version sync check passed"

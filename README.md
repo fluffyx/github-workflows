@@ -10,13 +10,31 @@ Reusable GitHub Actions workflows for `fluffyx/*` repositories.
 | **CI (Frontend)** | `ci-frontend.yml` | Pure frontend / component library repos |
 | **Review Pipeline** | `charlie-review.yml` | Charlie auto-review on PRs |
 
+## Required bin scripts
+
+These workflows delegate to bin scripts in your repo. Each repo decides what "check", "test", and "lint" mean for itself.
+
+| Script | Purpose | Called by | Example contents |
+|--------|---------|-----------|-----------------|
+| `bin/check` | Check-only (no file changes). Lint rules, typecheck, svelte-check. | `ci-frontend`, `ci-rails` | `prettier --check . && eslint . && svelte-check` |
+| `bin/test-frontend` | Frontend codegen + tests. | `ci-rails` | `pnpm codegen && pnpm test` |
+| `bin/audit-frontend` | Dependency audit across frontend dirs. | `ci-rails` | `pnpm audit` per frontend dir |
+| `bin/lint` | Auto-fix (transforms files). For developers and lefthook. | (not called by CI) | `prettier --write . && eslint --fix .` |
+| `bin/rubocop` | RuboCop wrapper. | `ci-rails` | `bundle exec rubocop "$@"` |
+| `bin/brakeman` | Brakeman wrapper. | `ci-rails` | `bundle exec brakeman "$@"` |
+| `bin/bundler-audit` | Bundler Audit wrapper. | `ci-rails` | `bundle exec bundler-audit check --update` |
+
+### Multi-frontend repos
+
+For repos with multiple frontend directories (`frontend/`, `frontend-admin/`, etc.), `bin/check`, `bin/test-frontend`, and `bin/audit-frontend` should iterate over all of them internally.
+
 ## CI (Rails)
 
-Full CI for Rails apps that may include one or more SvelteKit frontends. Runs Ruby security scanning (Brakeman, Bundler Audit), RuboCop, RSpec with Postgres, and auto-discovers `frontend/` or `frontend-*/` directories for frontend linting, typechecking, and testing.
+Full CI for Rails apps that may include one or more SvelteKit frontends.
+
+**Jobs:** `scan_ruby`, `lint` (RuboCop), `test` (RSpec + Postgres), `audit_frontend`, `check_frontend`, `test_frontend`. The frontend jobs are skipped automatically if no `frontend/` or `frontend-*` directories exist.
 
 ### Caller example
-
-Create `.github/workflows/ci.yml` in your Rails repo:
 
 ```yaml
 name: CI
@@ -32,11 +50,11 @@ jobs:
 
 ## CI (Frontend)
 
-CI for standalone frontend or component library repos (e.g. fx-glass). Lints, builds, tests, and optionally runs Playwright e2e tests.
+CI for standalone frontend or component library repos (e.g. fx-glass).
+
+**Jobs:** `check` (runs `bin/check`), `build-and-test`, and optionally `e2e` (Playwright).
 
 ### Caller example
-
-Create `.github/workflows/ci.yml` in your frontend repo:
 
 ```yaml
 name: CI
@@ -65,8 +83,6 @@ Prepares PR state labels, clears previous review-pipeline labels on each new PR 
 
 ### Caller example
 
-Create `.github/workflows/charlie-review.yml` in your repo:
-
 ```yaml
 name: Charlie Review
 on:
@@ -82,11 +98,21 @@ jobs:
     secrets: inherit
 ```
 
+## Version sync check
+
+Both CI workflows automatically run a version sync check (`check-version` job). It:
+
+- **Requires** `CHANGELOG.md` to exist
+- **Auto-discovers** version sources: `VERSION` file, `package.json` (version field), `version.rb`
+- **Fails** if any discovered versions disagree with each other
+- **Fails** if the latest CHANGELOG heading is a version that doesn't match the discovered version
+- **Passes** if the latest CHANGELOG heading is `[Unreleased]` (acceptable on branches)
+
+No configuration needed — it runs automatically for all repos using these workflows.
+
 ## Conventions
 
 - **Node 22, pnpm 10** — hardcoded in the shared workflows. Bump here to update all consumers.
 - **Ruby version** — read from `.ruby-version` in each consumer repo.
-- **Frontend discovery** — `ci-rails` auto-discovers `frontend/` and `frontend-*/` directories via a matrix strategy.
 - **GitHub Packages** — auth is configured automatically when a `GH_PACKAGES_TOKEN` secret exists in the caller repo, skipped otherwise.
-- **GraphQL codegen** — `pnpm codegen` runs with `continue-on-error: true` because not all frontends use it.
-- **`svelte-kit sync`** — runs with `continue-on-error: true` because only SvelteKit projects need it.
+- **`bin/lint` vs `bin/check`** — `bin/lint` auto-fixes files (for developers/lefthook). `bin/check` is read-only (for CI). CI never calls `bin/lint`.
