@@ -14,7 +14,7 @@ runs:
       run: |
         set -euo pipefail
 
-        semver_re='^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'
+        semver_re='^[0-9]+\.[0-9]+\.[0-9]+$'
 
         errors=()
 
@@ -125,7 +125,7 @@ runs:
           for ((i=0; i<${#valid_headings[@]}-1; i++)); do
             a="${valid_headings[$i]}"
             b="${valid_headings[$((i+1))]}"
-            higher=$(printf '%s\n%s\n' "$a" "$b" | sort -t. -k1,1nr -k2,2nr -k3,3nr -k4,4nr | head -1)
+            higher=$(printf '%s\n%s\n' "$a" "$b" | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)
             if [ "$higher" != "$a" ]; then
               errors+=("CHANGELOG.md is out of order: $a appears before $b but $b is a higher version")
             fi
