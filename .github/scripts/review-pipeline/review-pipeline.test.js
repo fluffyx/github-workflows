@@ -360,6 +360,8 @@ test('workflow and docs include Charlie check-run review events', () => {
   const docs = fs.readFileSync(path.join(root, 'docs/charlie-review-format.md'), 'utf8');
 
   assert.match(workflow, /checks:\s*write/);
+  assert.match(workflow, /repository:\s*\$\{\{\s*job\.workflow_repository\s*\}\}/);
+  assert.match(workflow, /ref:\s*\$\{\{\s*job\.workflow_sha\s*\}\}/);
   assert.match(readme, /pull_request_review:\n\s+types: \[submitted\]/);
   assert.match(docs, /Non-blocking feedback.*failure/s);
 });
