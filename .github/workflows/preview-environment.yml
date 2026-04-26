@@ -108,7 +108,7 @@ jobs:
               "https://api.render.com/v1/services/${PREVIEW_SERVICE_ID}/env-vars/$1" \
               -H "Authorization: Bearer ${RENDER_API_KEY}" \
               -H "Content-Type: application/json" \
-              -d "$payload"
+              -d "$payload" || exit 1
           }
           set_env_var DATABASE_URL "${DATABASE_URL}"
           set_env_var PREVIEW_ORIGIN_REGEX "${PREVIEW_ORIGIN_REGEX}"
