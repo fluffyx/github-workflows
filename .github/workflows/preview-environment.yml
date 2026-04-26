@@ -133,6 +133,7 @@ jobs:
           RENDER_SERVICE_NAME: ${{ inputs.render_service_name }}
           VERCEL_PROJECTS: ${{ inputs.vercel_project_ids }}
         run: |
+          printf '%s' "$VERCEL_PROJECTS" | jq empty || { echo "::error::Invalid JSON in vercel_project_ids"; exit 1; }
           RENDER_HOST="${RENDER_SERVICE_NAME}-pr-${PR_NUMBER}.onrender.com"
           RESULTS="[]"
           while IFS= read -r project; do
