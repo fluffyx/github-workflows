@@ -70,7 +70,11 @@ jobs:
           for i in 1 2 3 4 5; do
             RESPONSE=$(curl -sf \
               "https://api.render.com/v1/services?type=web_service&includePreviews=true&limit=50" \
-              -H "Authorization: Bearer ${RENDER_API_KEY}")
+              -H "Authorization: Bearer ${RENDER_API_KEY}") || {
+              echo "Render API request failed, retrying in 15s... ($i/5)"
+              sleep 15
+              continue
+            }
             PREVIEW_ID=$(printf '%s' "$RESPONSE" | jq -r \
               --arg branch "$PR_BRANCH" \
               --arg parent "$RENDER_SERVICE_ID" \
@@ -180,7 +184,7 @@ jobs:
               issue_number: context.issue.number,
             });
 
-            const existing = comments.find(c => c.body.includes(marker));
+            const existing = comments.find(c => c.body?.includes(marker));
             if (existing) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
