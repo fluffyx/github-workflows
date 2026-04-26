@@ -15,6 +15,10 @@ on:
         description: 'JSON array of {name, project_id, build_env?} objects for each frontend app'
         type: string
         required: true
+      neon_role:
+        description: Neon database role for the branch connection string
+        type: string
+        default: neondb_owner
       label_name:
         description: PR label that gates preview deployment
         type: string
@@ -58,6 +62,7 @@ jobs:
           project_id: ${{ secrets.NEON_PROJECT_ID }}
           api_key: ${{ secrets.NEON_API_KEY }}
           branch_name: preview/pr-${{ github.event.pull_request.number }}
+          username: ${{ inputs.neon_role }}
 
       - name: Find Render preview instance
         id: render
