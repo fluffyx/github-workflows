@@ -2,6 +2,8 @@ name: Request Charlie Review
 
 on:
   workflow_call:
+  pull_request:
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: read
