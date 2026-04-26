@@ -139,12 +139,12 @@ jobs:
             PROJECT_ID=$(printf '%s' "$project" | jq -r '.project_id')
             BUILD_ENV=$(printf '%s' "$project" | jq -r '.build_env // "VITE_API_DOMAIN"')
             export VERCEL_PROJECT_ID="$PROJECT_ID"
-            URL=$(npx vercel deploy --token "$VERCEL_TOKEN" --yes \
+            URL=$(npx vercel deploy --token "$VERCEL_TOKEN" --yes --no-clipboard \
               --build-env "${BUILD_ENV}=${RENDER_HOST}" \
               --meta githubCommitRef="${PR_BRANCH}" \
               --meta githubCommitSha="${PR_SHA}" \
               --meta githubCommitMessage="PR #${PR_NUMBER}: ${PR_TITLE}" \
-              --meta githubPrId="${PR_NUMBER}")
+              --meta githubPrId="${PR_NUMBER}" 2>/dev/null | tail -1)
             RESULTS=$(printf '%s' "$RESULTS" | jq -c --arg name "$NAME" --arg url "$URL" '. + [{"name": $name, "url": $url}]')
           done < <(printf '%s' "$VERCEL_PROJECTS" | jq -c '.[]')
           printf 'urls=%s\n' "$RESULTS" >> "$GITHUB_OUTPUT"
@@ -197,7 +197,7 @@ jobs:
 
   teardown-preview:
     if: |
-      github.event.action == 'closed' ||
+      (github.event.action == 'closed' && contains(github.event.pull_request.labels.*.name, inputs.label_name)) ||
       (github.event.action == 'unlabeled' && github.event.label.name == inputs.label_name)
     runs-on: ubuntu-latest
     steps:
