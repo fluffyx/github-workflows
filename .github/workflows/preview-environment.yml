@@ -68,20 +68,31 @@ jobs:
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           for i in 1 2 3 4 5; do
-            RESPONSE=$(curl -sf \
-              "https://api.render.com/v1/services?type=web_service&includePreviews=true&limit=50" \
-              -H "Authorization: Bearer ${RENDER_API_KEY}") || {
-              echo "Render API request failed, retrying in 15s... ($i/5)"
-              sleep 15
-              continue
-            }
-            PREVIEW_ID=$(printf '%s' "$RESPONSE" | jq -r \
-              --arg branch "$PR_BRANCH" \
-              --arg parent "$RENDER_SERVICE_ID" \
-              '[.[] | select(
-                .service.branch == $branch and
-                .service.serviceDetails.parentServer.id == $parent
-              )] | first | .service.id // empty')
+            PREVIEW_ID=""
+            CURSOR=""
+            while true; do
+              URL="https://api.render.com/v1/services?type=web_service&includePreviews=true&limit=100"
+              if [ -n "$CURSOR" ]; then
+                URL="${URL}&cursor=${CURSOR}"
+              fi
+              RESPONSE=$(curl -sf "$URL" \
+                -H "Authorization: Bearer ${RENDER_API_KEY}") || {
+                echo "Render API request failed, retrying in 15s... ($i/5)"
+                break
+              }
+              PREVIEW_ID=$(printf '%s' "$RESPONSE" | jq -r \
+                --arg branch "$PR_BRANCH" \
+                --arg parent "$RENDER_SERVICE_ID" \
+                '[.[] | select(
+                  .service.branch == $branch and
+                  .service.serviceDetails.parentServer.id == $parent
+                )] | first | .service.id // empty')
+              if [ -n "$PREVIEW_ID" ]; then break; fi
+              CURSOR=$(printf '%s' "$RESPONSE" | jq -r '.[-1].cursor // empty')
+              if [ -z "$CURSOR" ] || [ "$(printf '%s' "$RESPONSE" | jq 'length')" -lt 100 ]; then
+                break
+              fi
+            done
             if [ -n "$PREVIEW_ID" ]; then break; fi
             echo "Preview instance not found yet, retrying in 15s... ($i/5)"
             sleep 15
