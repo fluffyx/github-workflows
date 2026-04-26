@@ -78,7 +78,8 @@ jobs:
               RESPONSE=$(curl -sf "$URL" \
                 -H "Authorization: Bearer ${RENDER_API_KEY}") || {
                 echo "Render API request failed, retrying in 15s... ($i/5)"
-                break
+                sleep 15
+                continue 2
               }
               PREVIEW_ID=$(printf '%s' "$RESPONSE" | jq -r \
                 --arg branch "$PR_BRANCH" \
@@ -99,7 +100,9 @@ jobs:
           done
           if [ -z "$PREVIEW_ID" ]; then
             echo "::error::Could not find Render preview instance for branch ${PR_BRANCH}"
-            echo "::error::API returned: $(printf '%s' "$RESPONSE" | jq -c '[.[] | {name: .service.name, branch: .service.branch, parent: .service.serviceDetails.parentServer.id?}]')"
+            if [ -n "$RESPONSE" ]; then
+              echo "::error::API returned: $(printf '%s' "$RESPONSE" | jq -c '[.[] | {name: .service.name, branch: .service.branch, parent: .service.serviceDetails.parentServer.id?}]')"
+            fi
             exit 1
           fi
           echo "Found preview instance: ${PREVIEW_ID}"
