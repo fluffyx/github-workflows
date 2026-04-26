@@ -158,7 +158,7 @@ jobs:
           echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
 
       - if: env.GH_PACKAGES_TOKEN != ''
-        run: git config --global url."https://x-access-token:${{ env.GH_PACKAGES_TOKEN }}@github.com/".insteadOf "https://github.com/"
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Install frontend dependencies
         run: |
@@ -198,7 +198,7 @@ jobs:
           echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
 
       - if: env.GH_PACKAGES_TOKEN != ''
-        run: git config --global url."https://x-access-token:${{ env.GH_PACKAGES_TOKEN }}@github.com/".insteadOf "https://github.com/"
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Install frontend dependencies
         run: |
@@ -238,7 +238,7 @@ jobs:
           echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
 
       - if: env.GH_PACKAGES_TOKEN != ''
-        run: git config --global url."https://x-access-token:${{ env.GH_PACKAGES_TOKEN }}@github.com/".insteadOf "https://github.com/"
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Install frontend dependencies
         run: |
