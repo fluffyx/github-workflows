@@ -75,8 +75,8 @@ jobs:
             RESPONSE=$(curl -sf \
               "https://api.render.com/v1/services?type=web_service&includePreviews=true&limit=50" \
               -H "Authorization: Bearer ${RENDER_API_KEY}") || {
-              echo "Render API request failed, retrying in ${retry_delay}s... ($i/$max_retries)"
-              sleep "$retry_delay"
+              echo "Render API request failed ($i/$max_retries)"
+              if [ "$i" -lt "$max_retries" ]; then sleep "$retry_delay"; fi
               continue
             }
             PREVIEW_ID=$(printf '%s' "$RESPONSE" | jq -r \
@@ -87,8 +87,8 @@ jobs:
                 .service.serviceDetails.parentServer.id == $parent
               )] | first | .service.id // empty')
             if [ -n "$PREVIEW_ID" ]; then break; fi
-            echo "Preview instance not found yet, retrying in ${retry_delay}s... ($i/$max_retries)"
-            sleep "$retry_delay"
+            echo "Preview instance not found yet ($i/$max_retries)"
+            if [ "$i" -lt "$max_retries" ]; then sleep "$retry_delay"; fi
           done
           if [ -z "$PREVIEW_ID" ]; then
             echo "::error::Could not find Render preview instance for branch ${PR_BRANCH}"
