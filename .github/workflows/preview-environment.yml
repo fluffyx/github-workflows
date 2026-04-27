@@ -68,12 +68,15 @@ jobs:
           RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
-          for i in 1 2 3 4 5; do
+          retry_delay=15
+          timeout_minutes=5
+          max_retries=$(( timeout_minutes * 60 / retry_delay ))
+          for i in $(seq 1 "$max_retries"); do
             RESPONSE=$(curl -sf \
               "https://api.render.com/v1/services?type=web_service&includePreviews=true&limit=50" \
               -H "Authorization: Bearer ${RENDER_API_KEY}") || {
-              echo "Render API request failed, retrying in 15s... ($i/5)"
-              sleep 15
+              echo "Render API request failed, retrying in ${retry_delay}s... ($i/$max_retries)"
+              sleep "$retry_delay"
               continue
             }
             PREVIEW_ID=$(printf '%s' "$RESPONSE" | jq -r \
@@ -84,8 +87,8 @@ jobs:
                 .service.serviceDetails.parentServer.id == $parent
               )] | first | .service.id // empty')
             if [ -n "$PREVIEW_ID" ]; then break; fi
-            echo "Preview instance not found yet, retrying in 15s... ($i/5)"
-            sleep 15
+            echo "Preview instance not found yet, retrying in ${retry_delay}s... ($i/$max_retries)"
+            sleep "$retry_delay"
           done
           if [ -z "$PREVIEW_ID" ]; then
             echo "::error::Could not find Render preview instance for branch ${PR_BRANCH}"
@@ -114,6 +117,18 @@ jobs:
           set_env_var DATABASE_URL "${DATABASE_URL}"
           set_env_var PREVIEW_ORIGIN_REGEX "${PREVIEW_ORIGIN_REGEX}"
           set_env_var SENTRY_ENVIRONMENT preview
+          set_env_var PREVIEW_DB_CONFIGURED true
+
+      - name: Trigger Render preview redeploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          PREVIEW_SERVICE_ID: ${{ steps.render.outputs.preview_service_id }}
+        run: |
+          curl -sf -X POST \
+            "https://api.render.com/v1/services/${PREVIEW_SERVICE_ID}/deploys" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}' || exit 1
 
       - uses: actions/setup-node@v6
         with:
