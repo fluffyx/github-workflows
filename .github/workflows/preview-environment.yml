@@ -12,7 +12,7 @@ on:
         type: string
         required: true
       vercel_project_ids:
-        description: 'JSON array of {name, project_id, build_env?} objects for each frontend app'
+        description: 'JSON array of {name, var_name, build_env?} objects for each frontend app. var_name is the name of a repository variable holding the Vercel project ID.'
         type: string
         required: true
       label_name:
@@ -68,7 +68,10 @@ jobs:
           RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
-          for i in 1 2 3 4 5; do
+          retry_delay=15
+          timeout=300
+          max_retries=$(( timeout / retry_delay ))
+          for i in $(seq 1 "$max_retries"); do
             PREVIEW_ID=""
             CURSOR=""
             while true; do
@@ -78,8 +81,8 @@ jobs:
               fi
               RESPONSE=$(curl -sf "$URL" \
                 -H "Authorization: Bearer ${RENDER_API_KEY}") || {
-                echo "Render API request failed, retrying in 15s... ($i/5)"
-                sleep 15
+                echo "Render API request failed ($i/$max_retries)"
+                if [ "$i" -lt "$max_retries" ]; then sleep "$retry_delay"; fi
                 continue 2
               }
               PREVIEW_ID=$(printf '%s' "$RESPONSE" | jq -r \
@@ -96,8 +99,8 @@ jobs:
               fi
             done
             if [ -n "$PREVIEW_ID" ]; then break; fi
-            echo "Preview instance not found yet, retrying in 15s... ($i/5)"
-            sleep 15
+            echo "Preview instance not found yet ($i/$max_retries)"
+            if [ "$i" -lt "$max_retries" ]; then sleep "$retry_delay"; fi
           done
           if [ -z "$PREVIEW_ID" ]; then
             echo "::error::Could not find Render preview instance for branch ${PR_BRANCH}"
@@ -128,6 +131,18 @@ jobs:
           set_env_var DATABASE_URL "${DATABASE_URL}"
           set_env_var PREVIEW_ORIGIN_REGEX "${PREVIEW_ORIGIN_REGEX}"
           set_env_var SENTRY_ENVIRONMENT preview
+          set_env_var PREVIEW_DB_CONFIGURED true
+
+      - name: Trigger Render preview redeploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          PREVIEW_SERVICE_ID: ${{ steps.render.outputs.preview_service_id }}
+        run: |
+          curl -sf -X POST \
+            "https://api.render.com/v1/services/${PREVIEW_SERVICE_ID}/deploys" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}' || exit 1
 
       - uses: actions/setup-node@v6
         with:
@@ -145,6 +160,7 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          ALL_VARS: ${{ toJSON(vars) }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
@@ -157,7 +173,12 @@ jobs:
           RESULTS="[]"
           while IFS= read -r project; do
             NAME=$(printf '%s' "$project" | jq -r '.name')
-            PROJECT_ID=$(printf '%s' "$project" | jq -r '.project_id')
+            VAR_NAME=$(printf '%s' "$project" | jq -r '.var_name')
+            PROJECT_ID=$(printf '%s' "$ALL_VARS" | jq -r --arg k "$VAR_NAME" '.[$k]')
+            if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ]; then
+              echo "::error::Variable ${VAR_NAME} not found for project ${NAME}"
+              exit 1
+            fi
             BUILD_ENV=$(printf '%s' "$project" | jq -r '.build_env // "VITE_API_DOMAIN"')
             export VERCEL_PROJECT_ID="$PROJECT_ID"
             URL=$(npx vercel deploy --token "$VERCEL_TOKEN" --yes --no-clipboard \
@@ -201,52 +222,6 @@ jobs:
               } else {
                 core.warning(`createDeployment for ${app.name} did not return an id; skipping status`);
               }
-            }
-
-      - name: Post preview URLs
-        uses: actions/github-script@v7
-        env:
-          RENDER_HOST: ${{ inputs.render_service_name }}-pr-${{ github.event.pull_request.number }}.onrender.com
-          VERCEL_URLS: ${{ steps.vercel.outputs.urls }}
-        with:
-          script: |
-            const marker = '<!-- preview-environment -->';
-            const vercelUrls = JSON.parse(process.env.VERCEL_URLS);
-            const rows = [
-              `| API | https://${process.env.RENDER_HOST} |`,
-              ...vercelUrls.map(v => `| ${v.name} | ${v.url} |`),
-              `| Neon | \`preview/pr-${context.issue.number}\` |`,
-            ];
-            const body = [
-              marker,
-              '### Preview Environment',
-              '',
-              '| Service | URL |',
-              '|---------|-----|',
-              ...rows,
-            ].join('\n');
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const existing = comments.find(c => c.body?.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
             }
 
   teardown-preview:
