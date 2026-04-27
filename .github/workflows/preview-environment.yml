@@ -12,7 +12,7 @@ on:
         type: string
         required: true
       vercel_project_ids:
-        description: 'JSON array of {name, secret_name, build_env?} objects for each frontend app. secret_name is the name of a repo secret holding the Vercel project ID.'
+        description: 'JSON array of {name, var_name, build_env?} objects for each frontend app. var_name is the name of a repository variable holding the Vercel project ID.'
         type: string
         required: true
       label_name:
@@ -131,7 +131,7 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          ALL_SECRETS: ${{ toJSON(secrets) }}
+          ALL_VARS: ${{ toJSON(vars) }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
@@ -144,10 +144,10 @@ jobs:
           RESULTS="[]"
           while IFS= read -r project; do
             NAME=$(printf '%s' "$project" | jq -r '.name')
-            SECRET_NAME=$(printf '%s' "$project" | jq -r '.secret_name')
-            PROJECT_ID=$(printf '%s' "$ALL_SECRETS" | jq -r --arg k "$SECRET_NAME" '.[$k]')
+            VAR_NAME=$(printf '%s' "$project" | jq -r '.var_name')
+            PROJECT_ID=$(printf '%s' "$ALL_VARS" | jq -r --arg k "$VAR_NAME" '.[$k]')
             if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ]; then
-              echo "::error::Secret ${SECRET_NAME} not found for project ${NAME}"
+              echo "::error::Variable ${VAR_NAME} not found for project ${NAME}"
               exit 1
             fi
             BUILD_ENV=$(printf '%s' "$project" | jq -r '.build_env // "VITE_API_DOMAIN"')
