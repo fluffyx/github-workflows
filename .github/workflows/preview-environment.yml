@@ -69,8 +69,8 @@ jobs:
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           retry_delay=15
-          timeout_minutes=5
-          max_retries=$(( timeout_minutes * 60 / retry_delay ))
+          timeout=300
+          max_retries=$(( timeout / retry_delay ))
           for i in $(seq 1 "$max_retries"); do
             RESPONSE=$(curl -sf \
               "https://api.render.com/v1/services?type=web_service&includePreviews=true&limit=50" \
