@@ -42,6 +42,9 @@ permissions:
 
 jobs:
   deploy-render:
+    concurrency:
+      group: preview-neon-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     if: |
       github.event.action != 'closed' &&
       github.event.action != 'unlabeled' &&
@@ -55,6 +58,15 @@ jobs:
           project_id: ${{ secrets.NEON_PROJECT_ID }}
           api_key: ${{ secrets.NEON_API_KEY }}
           branch_name: preview/pr-${{ github.event.pull_request.number }}
+
+      - name: Validate Neon branch
+        env:
+          DB_URL: ${{ steps.neon.outputs.db_url }}
+        run: |
+          if [ -z "$DB_URL" ]; then
+            echo "::error::Neon branch created but db_url output is empty"
+            exit 1
+          fi
 
       - name: Find Render preview instance
         id: render
@@ -219,6 +231,9 @@ jobs:
             }
 
   teardown-preview:
+    concurrency:
+      group: preview-neon-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     if: |
       (github.event.action == 'closed' && contains(github.event.pull_request.labels.*.name, inputs.label_name)) ||
       (github.event.action == 'unlabeled' && github.event.label.name == inputs.label_name)
