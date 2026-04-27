@@ -126,7 +126,19 @@ No configuration needed — it runs automatically for all repos using these work
 
 ## Dependency audit
 
-Both workflows run `pnpm audit` (hard-fail). To ignore an unfixable CVE, add it to `pnpm.auditConfig.ignoreCves` in your `package.json`.
+Both workflows run `pnpm audit` (hard-fail). To ignore an unfixable CVE, add it to `pnpm.auditConfig.ignoreCves` in your `package.json`:
+
+```json
+{
+  "pnpm": {
+    "auditConfig": {
+      "ignoreCves": ["CVE-2024-XXXXX"]
+    }
+  }
+}
+```
+
+The `ci-frontend` workflow reads this array and passes `--ignore` flags to `pnpm audit` automatically (pnpm 10 does not read `auditConfig` natively).
 
 ## Pack dry-run
 
