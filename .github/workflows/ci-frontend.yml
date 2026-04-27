@@ -49,11 +49,11 @@ jobs:
 
       - name: Audit
         run: |
-          ignore_flags=$(node -e "
+          mapfile -t ignore_flags < <(node -e "
             const cves = require('./package.json').pnpm?.auditConfig?.ignoreCves ?? [];
-            process.stdout.write(cves.map(c => '--ignore=' + c).join(' '));
+            cves.forEach(c => console.log('--ignore=' + c));
           ")
-          pnpm audit $ignore_flags
+          pnpm audit "${ignore_flags[@]}"
 
   check:
     runs-on: ubuntu-latest
