@@ -154,6 +154,7 @@ jobs:
               -d '{}' || exit 1
           ) &
           RENDER_PID=$!
+          trap 'kill $RENDER_PID 2>/dev/null || true; wait $RENDER_PID 2>/dev/null || true' EXIT
 
           # --- Vercel (foreground) ---
           printf '%s' "$VERCEL_PROJECTS" | jq empty || { echo "::error::Invalid JSON in vercel_project_ids"; exit 1; }
