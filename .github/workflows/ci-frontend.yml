@@ -48,7 +48,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Audit
-        run: pnpm audit
+        run: |
+          mapfile -t ignore_flags < <(node -e "
+            const cves = require('./package.json').pnpm?.auditConfig?.ignoreCves ?? [];
+            cves.forEach(c => console.log('--ignore=' + c));
+          ")
+          pnpm audit "${ignore_flags[@]}"
 
   check:
     runs-on: ubuntu-latest
