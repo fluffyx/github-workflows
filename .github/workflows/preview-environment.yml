@@ -125,9 +125,6 @@ jobs:
           set_env_var PREVIEW_ORIGIN_REGEX "${PREVIEW_ORIGIN_REGEX}"
           set_env_var SENTRY_ENVIRONMENT preview
           set_env_var PREVIEW_DB_CONFIGURED true
-          if [ -n "${GH_PACKAGES_TOKEN}" ]; then
-            set_env_var GH_PACKAGES_TOKEN "${GH_PACKAGES_TOKEN}"
-          fi
 
       - name: Trigger Render preview redeploy
         env:
