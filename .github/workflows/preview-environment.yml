@@ -200,6 +200,7 @@ jobs:
   finalize:
     needs: [deploy-render, deploy-vercel]
     if: |
+      success() &&
       github.event.action != 'closed' &&
       github.event.action != 'unlabeled' &&
       contains(github.event.pull_request.labels.*.name, inputs.label_name)
