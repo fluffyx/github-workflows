@@ -33,9 +33,14 @@ jobs:
   scan_ruby:
     runs-on: ubuntu-latest
     env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
       BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
     steps:
       - uses: actions/checkout@v6
+
+      - name: Configure git auth for private deps
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -50,10 +55,15 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
       RUBOCOP_CACHE_ROOT: tmp/rubocop
       BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
     steps:
       - uses: actions/checkout@v6
+
+      - name: Configure git auth for private deps
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -91,9 +101,14 @@ jobs:
       DB_USER: postgres
       DB_PASSWORD: postgres
       RAILS_ENV: test
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
       BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
     steps:
       - uses: actions/checkout@v6
+
+      - name: Configure git auth for private deps
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -110,9 +125,14 @@ jobs:
   pack:
     runs-on: ubuntu-latest
     env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
       BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
     steps:
       - uses: actions/checkout@v6
+
+      - name: Configure git auth for private deps
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - uses: ruby/setup-ruby@v1
         with:
