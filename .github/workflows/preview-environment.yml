@@ -41,17 +41,13 @@ permissions:
   pull-requests: write
 
 jobs:
-  deploy-preview:
+  deploy-render:
     if: |
       github.event.action != 'closed' &&
       github.event.action != 'unlabeled' &&
       contains(github.event.pull_request.labels.*.name, inputs.label_name)
     runs-on: ubuntu-latest
-    env:
-      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
     steps:
-      - uses: actions/checkout@v6
-
       - name: Create Neon branch
         id: neon
         uses: neondatabase/create-branch-action@v5
@@ -59,7 +55,6 @@ jobs:
           project_id: ${{ secrets.NEON_PROJECT_ID }}
           api_key: ${{ secrets.NEON_API_KEY }}
           branch_name: preview/pr-${{ github.event.pull_request.number }}
-          # username omitted — defaults to the project's default role (neondb_owner)
 
       - name: Find Render preview instance
         id: render
@@ -129,6 +124,17 @@ jobs:
             -H "Authorization: Bearer ${RENDER_API_KEY}" \
             -H "Content-Type: application/json" \
             -d '{}' || exit 1
+
+  deploy-vercel:
+    if: |
+      github.event.action != 'closed' &&
+      github.event.action != 'unlabeled' &&
+      contains(github.event.pull_request.labels.*.name, inputs.label_name)
+    runs-on: ubuntu-latest
+    env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
