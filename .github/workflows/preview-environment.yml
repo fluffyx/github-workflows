@@ -40,11 +40,12 @@ permissions:
   deployments: write
   pull-requests: write
 
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   deploy-render:
-    concurrency:
-      group: preview-neon-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
     if: |
       github.event.action != 'closed' &&
       github.event.action != 'unlabeled' &&
@@ -143,6 +144,8 @@ jobs:
       github.event.action != 'unlabeled' &&
       contains(github.event.pull_request.labels.*.name, inputs.label_name)
     runs-on: ubuntu-latest
+    outputs:
+      urls: ${{ steps.vercel.outputs.urls }}
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
     steps:
@@ -194,10 +197,18 @@ jobs:
           done < <(printf '%s' "$VERCEL_PROJECTS" | jq -c '.[]')
           printf 'urls=%s\n' "$RESULTS" >> "$GITHUB_OUTPUT"
 
+  finalize:
+    needs: [deploy-render, deploy-vercel]
+    if: |
+      github.event.action != 'closed' &&
+      github.event.action != 'unlabeled' &&
+      contains(github.event.pull_request.labels.*.name, inputs.label_name)
+    runs-on: ubuntu-latest
+    steps:
       - name: Create GitHub deployments for Vercel previews
         uses: actions/github-script@v7
         env:
-          VERCEL_URLS: ${{ steps.vercel.outputs.urls }}
+          VERCEL_URLS: ${{ needs.deploy-vercel.outputs.urls }}
         with:
           script: |
             const vercelUrls = JSON.parse(process.env.VERCEL_URLS);
@@ -228,9 +239,6 @@ jobs:
             }
 
   teardown-preview:
-    concurrency:
-      group: preview-neon-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
     if: |
       (github.event.action == 'closed' && contains(github.event.pull_request.labels.*.name, inputs.label_name)) ||
       (github.event.action == 'unlabeled' && github.event.label.name == inputs.label_name)
