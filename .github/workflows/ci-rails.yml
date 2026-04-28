@@ -361,13 +361,21 @@ jobs:
           sudo apt-get install -y caddy
 
       - name: Install Playwright browsers
-        run: pnpm --dir frontend exec playwright install --with-deps chromium
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            pnpm --dir "$dir" exec playwright install --with-deps chromium
+          done
 
       - name: Prepare database
         run: bin/rails db:test:prepare
 
       - name: Generate GraphQL types
-        run: cd frontend && pnpm codegen
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            pnpm --dir "$dir" codegen 2>/dev/null || true
+          done
 
       - name: Run E2E tests
         run: bin/e2e
