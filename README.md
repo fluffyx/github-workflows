@@ -87,7 +87,7 @@ Prepares PR state labels, clears previous review-pipeline labels on each new PR 
 name: Charlie Review
 on:
   pull_request:
-    types: [opened, reopened, synchronize]
+    types: [opened, reopened, synchronize, ready_for_review]
 permissions:
   contents: read
   issues: write
