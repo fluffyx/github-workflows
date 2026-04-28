@@ -30,6 +30,22 @@ jobs:
             echo "has_frontends=false" >> "$GITHUB_OUTPUT"
           fi
 
+  discover_e2e:
+    runs-on: ubuntu-latest
+    outputs:
+      has_e2e: ${{ steps.find.outputs.has_e2e }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check for E2E tests
+        id: find
+        run: |
+          if [ -x bin/e2e ] && ls -d frontend*/tests/e2e/ >/dev/null 2>&1; then
+            echo "has_e2e=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_e2e=false" >> "$GITHUB_OUTPUT"
+          fi
+
   scan_ruby:
     runs-on: ubuntu-latest
     env:
@@ -272,3 +288,98 @@ jobs:
         run: bin/test-frontend
         env:
           COVERAGE: "true"
+
+  e2e:
+    needs: discover_e2e
+    if: needs.discover_e2e.outputs.has_e2e == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      DB_HOST: localhost
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      RAILS_ENV: test
+      DEV_PORT: "4100"
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      VITE_STRIPE_PUBLISHABLE_KEY: ${{ secrets.VITE_STRIPE_PUBLISHABLE_KEY }}
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+      BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure git auth for private deps
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend*/pnpm-lock.yaml
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure GitHub Packages auth
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: |
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
+
+      - name: Install frontend dependencies
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            echo "==> Installing $dir"
+            pnpm --dir "$dir" install --frozen-lockfile
+          done
+
+      - name: Install Caddy
+        run: |
+          sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
+          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+          sudo apt-get update
+          sudo apt-get install -y caddy
+
+      - name: Install Playwright browsers
+        run: pnpm --dir frontend exec playwright install --with-deps chromium
+
+      - name: Prepare database
+        run: bin/rails db:test:prepare
+
+      - name: Generate GraphQL types
+        run: cd frontend && pnpm codegen
+
+      - name: Run E2E tests
+        run: bin/e2e
+        env:
+          CI: "true"
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: |
+            frontend*/test-results/
+            tmp/logs/
+          retention-days: 7
