@@ -101,11 +101,10 @@ Enforces conventional commit format on PR titles using `amannn/action-semantic-p
 name: PR Title
 on:
   pull_request:
-    types: [opened, edited, synchronize]
+    types: [opened, edited, synchronize, reopened]
 jobs:
   check:
     uses: fluffyx/github-workflows/.github/workflows/pr-title.yml@main
-    secrets: inherit
 ```
 
 ## Review Pipeline
