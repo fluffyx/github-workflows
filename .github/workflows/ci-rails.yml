@@ -308,7 +308,7 @@ jobs:
     needs: discover_e2e
     if: needs.discover_e2e.outputs.has_e2e == 'true'
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         suite: ${{ fromJson(needs.discover_e2e.outputs.suites) }}
         shard: ${{ fromJson(needs.discover_e2e.outputs.shards) }}
@@ -417,7 +417,7 @@ jobs:
 
       - name: Run E2E tests
         run: |
-          (cd "${{ matrix.suite }}" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ inputs.e2e_shards }})
+          (cd "${{ matrix.suite }}" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ inputs.e2e_shards }} --bail 1)
         env:
           CI: "true"
           DEV_E2E_RUNNING: "true"
