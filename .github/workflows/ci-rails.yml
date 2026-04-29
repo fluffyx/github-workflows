@@ -13,12 +13,14 @@ permissions:
 
 jobs:
   check-version:
+    name: review / check-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: fluffyx/github-workflows/actions/check-version@main
 
   discover_frontends:
+    name: frontends / discover
     runs-on: ubuntu-latest
     outputs:
       has_frontends: ${{ steps.find.outputs.has_frontends }}
@@ -35,7 +37,7 @@ jobs:
           fi
 
   discover_e2e:
-    name: e2e / discover_frontend
+    name: frontends / e2e / discover
     runs-on: ubuntu-latest
     outputs:
       has_e2e: ${{ steps.find.outputs.has_e2e }}
@@ -67,6 +69,7 @@ jobs:
           fi
 
   scan_ruby:
+    name: ruby / scan
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -89,6 +92,7 @@ jobs:
         run: bin/bundler-audit
 
   lint:
+    name: ruby / lint
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -118,6 +122,7 @@ jobs:
         run: bin/rubocop -f github
 
   test:
+    name: ruby / test
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -159,6 +164,7 @@ jobs:
           COVERAGE: "true"
 
   pack:
+    name: ruby / pack
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -188,6 +194,7 @@ jobs:
           fi
 
   audit_frontend:
+    name: frontends / audit
     needs: discover_frontends
     if: needs.discover_frontends.outputs.has_frontends == 'true'
     runs-on: ubuntu-latest
@@ -228,6 +235,7 @@ jobs:
         run: bin/audit-frontend
 
   check_frontend:
+    name: frontends / check
     needs: discover_frontends
     if: needs.discover_frontends.outputs.has_frontends == 'true'
     runs-on: ubuntu-latest
@@ -268,6 +276,7 @@ jobs:
         run: bin/check
 
   test_frontend:
+    name: frontends / test
     needs: discover_frontends
     if: needs.discover_frontends.outputs.has_frontends == 'true'
     runs-on: ubuntu-latest
@@ -310,11 +319,11 @@ jobs:
           COVERAGE: "true"
 
   e2e:
-    name: "e2e (${{ matrix.suite }} #${{ matrix.shard }})"
+    name: "${{ matrix.suite }} / e2e / #${{ matrix.shard }}"
     needs: discover_e2e
     if: needs.discover_e2e.outputs.has_e2e == 'true'
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         suite: ${{ fromJson(needs.discover_e2e.outputs.suites) }}
         shard: ${{ fromJson(needs.discover_e2e.outputs.shards) }}
