@@ -67,7 +67,7 @@ jobs:
 
 CI for standalone frontend or component library repos (e.g. fx-glass).
 
-**Jobs:** `check-version`, `audit` (pnpm audit), `check` (runs `bin/check`), `build-and-test` (build + pack dry-run + tests), and optionally `e2e` (Playwright).
+**Jobs:** `check-version`, `audit` (pnpm audit), `check` (runs `bin/check`), `build` (sync + build + pack dry-run), `test` (unit tests), and optionally `e2e` (Playwright).
 
 ### Caller example
 
