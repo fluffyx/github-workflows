@@ -31,7 +31,9 @@ jobs:
             [ -d "${dir}tests/e2e" ] || continue
             suites+=("${dir%/}")
           done
-          shards_n=$(( ${{ inputs.e2e_shards }} > 0 ? ${{ inputs.e2e_shards }} : 1 ))
+          shards_n="${{ inputs.e2e_shards }}"
+          shards_n="${shards_n%%.*}"
+          shards_n=$(( shards_n > 0 ? shards_n : 1 ))
           if [ ${#suites[@]} -gt 0 ] && [ -x bin/dev-e2e ]; then
             echo "has_e2e=true" >> "$GITHUB_OUTPUT"
             echo "suites=$(jq -cn '$ARGS.positional' --args "${suites[@]}")" >> "$GITHUB_OUTPUT"
@@ -143,7 +145,7 @@ jobs:
         run: |
           for dir in frontend*/; do
             [ -f "$dir/package.json" ] || continue
-            pnpm --dir "$dir" codegen 2>/dev/null || true
+            pnpm --dir "$dir" run --if-present codegen
           done
 
       - name: Start dev server
@@ -158,10 +160,11 @@ jobs:
 
       - name: Run E2E tests
         run: |
-          (cd "${{ matrix.suite }}" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ needs.discover_e2e.outputs.shard_total }} --max-failures 1)
+          (cd "$SUITE" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ needs.discover_e2e.outputs.shard_total }} --max-failures 1)
         env:
           CI: "true"
           DEV_E2E_RUNNING: "true"
+          SUITE: ${{ matrix.suite }}
 
       - name: Upload test artifacts
         if: always()
