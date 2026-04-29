@@ -10,8 +10,55 @@ on:
 permissions:
   contents: read
   packages: read
+  pull-requests: read
 
 jobs:
+  filter:
+    name: ci-filter
+    runs-on: ubuntu-latest
+    outputs:
+      skip_e2e: ${{ steps.classify.outputs.skip_e2e }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dorny/paths-filter@v3
+        id: paths
+        with:
+          base: ${{ github.base_ref || github.event.repository.default_branch || 'main' }}
+          filters: |
+            e2e_relevant:
+              - '**'
+              - '!**/*.md'
+              - '!spec/**'
+              - '!.rubocop.yml'
+              - '!.rubocop_todo.yml'
+              - '!.github/**'
+              - '!Dockerfile*'
+              - '!docker-compose*'
+              - '!.dockerignore'
+              - '!render.yaml'
+              - '!railway.toml'
+              - '!.kamal/**'
+              - '!deploy/**'
+              - '!Procfile*'
+              - '!Caddyfile*'
+              - '!vercel.json'
+              - '!.gitignore'
+              - '!.gitattributes'
+              - '!lefthook.yml'
+              - '!conductor.json'
+              - '!LICENSE'
+
+      - name: Classify changes
+        id: classify
+        run: |
+          E2E_RELEVANT="${{ steps.paths.outputs.e2e_relevant }}"
+          if [ "$E2E_RELEVANT" = "false" ]; then
+            printf 'skip_e2e=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'skip_e2e=false\n' >> "$GITHUB_OUTPUT"
+          fi
+
   discover_e2e:
     name: discover
     runs-on: ubuntu-latest
@@ -48,8 +95,8 @@ jobs:
 
   e2e:
     name: "${{ matrix.suite }} / #${{ matrix.shard }}"
-    needs: discover_e2e
-    if: needs.discover_e2e.outputs.has_e2e == 'true'
+    needs: [discover_e2e, filter]
+    if: "!cancelled() && needs.discover_e2e.outputs.has_e2e == 'true' && (needs.filter.result != 'success' || needs.filter.outputs.skip_e2e != 'true')"
     strategy:
       fail-fast: false
       matrix:
