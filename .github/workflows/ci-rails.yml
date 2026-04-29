@@ -372,7 +372,7 @@ jobs:
         run: |
           for dir in frontend*/; do
             [ -f "$dir/package.json" ] || continue
-            pnpm --dir "$dir" exec playwright install ${{ steps.playwright-cache.outputs.cache-hit == 'true' && 'chromium' || '--with-deps chromium' }}
+            pnpm --dir "$dir" exec playwright install --with-deps chromium
           done
 
       - name: Prepare database
