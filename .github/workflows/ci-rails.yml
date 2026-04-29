@@ -14,6 +14,93 @@ jobs:
       - uses: actions/checkout@v6
       - uses: fluffyx/github-workflows/actions/check-version@main
 
+  filter:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_only: ${{ steps.classify.outputs.frontend_only }}
+      ruby_tests_only: ${{ steps.classify.outputs.ruby_tests_only }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+      skip_e2e: ${{ steps.classify.outputs.skip_e2e }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dorny/paths-filter@v3
+        id: paths
+        with:
+          base: ${{ github.base_ref || github.event.repository.default_branch || 'main' }}
+          filters: |
+            frontend:
+              - 'frontend*/**'
+            ruby_tests:
+              - 'spec/**'
+              - '.rubocop.yml'
+              - '.rubocop_todo.yml'
+            non_frontend_code:
+              - '**'
+              - '!frontend*/**'
+              - '!**/*.md'
+            non_ruby_tests_code:
+              - '**'
+              - '!spec/**'
+              - '!.rubocop.yml'
+              - '!.rubocop_todo.yml'
+              - '!**/*.md'
+            any_code:
+              - '**'
+              - '!**/*.md'
+            e2e_relevant:
+              - '**'
+              - '!**/*.md'
+              - '!spec/**'
+              - '!.rubocop.yml'
+              - '!.rubocop_todo.yml'
+              - '!.github/**'
+              - '!Dockerfile*'
+              - '!docker-compose*'
+              - '!.dockerignore'
+              - '!render.yaml'
+              - '!railway.toml'
+              - '!.kamal/**'
+              - '!deploy/**'
+              - '!Procfile*'
+              - '!Caddyfile*'
+              - '!vercel.json'
+              - '!.gitignore'
+              - '!.gitattributes'
+              - '!lefthook.yml'
+              - '!conductor.json'
+              - '!LICENSE'
+
+      - name: Classify changes
+        id: classify
+        run: |
+          FRONTEND="${{ steps.paths.outputs.frontend }}"
+          RUBY_TESTS="${{ steps.paths.outputs.ruby_tests }}"
+          NON_FRONTEND="${{ steps.paths.outputs.non_frontend_code }}"
+          NON_RUBY_TESTS="${{ steps.paths.outputs.non_ruby_tests_code }}"
+          ANY_CODE="${{ steps.paths.outputs.any_code }}"
+          if [ "$FRONTEND" = "true" ] && [ "$NON_FRONTEND" = "false" ]; then
+            printf 'frontend_only=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'frontend_only=false\n' >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$RUBY_TESTS" = "true" ] && [ "$NON_RUBY_TESTS" = "false" ]; then
+            printf 'ruby_tests_only=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'ruby_tests_only=false\n' >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$ANY_CODE" = "false" ]; then
+            printf 'docs_only=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'docs_only=false\n' >> "$GITHUB_OUTPUT"
+          fi
+          E2E_RELEVANT="${{ steps.paths.outputs.e2e_relevant }}"
+          if [ "$E2E_RELEVANT" = "false" ]; then
+            printf 'skip_e2e=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'skip_e2e=false\n' >> "$GITHUB_OUTPUT"
+          fi
+
   discover_frontends:
     runs-on: ubuntu-latest
     outputs:
@@ -25,9 +112,9 @@ jobs:
         id: find
         run: |
           if ls -d frontend frontend-* >/dev/null 2>&1; then
-            echo "has_frontends=true" >> "$GITHUB_OUTPUT"
+            printf 'has_frontends=true\n' >> "$GITHUB_OUTPUT"
           else
-            echo "has_frontends=false" >> "$GITHUB_OUTPUT"
+            printf 'has_frontends=false\n' >> "$GITHUB_OUTPUT"
           fi
 
   discover_e2e:
@@ -41,12 +128,14 @@ jobs:
         id: find
         run: |
           if [ -x bin/e2e ] && ls -d frontend*/tests/e2e/ >/dev/null 2>&1; then
-            echo "has_e2e=true" >> "$GITHUB_OUTPUT"
+            printf 'has_e2e=true\n' >> "$GITHUB_OUTPUT"
           else
-            echo "has_e2e=false" >> "$GITHUB_OUTPUT"
+            printf 'has_e2e=false\n' >> "$GITHUB_OUTPUT"
           fi
 
   scan_ruby:
+    needs: [filter]
+    if: "!cancelled() && (needs.filter.result != 'success' || (needs.filter.outputs.frontend_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -69,6 +158,8 @@ jobs:
         run: bin/bundler-audit
 
   lint:
+    needs: [filter]
+    if: "!cancelled() && (needs.filter.result != 'success' || (needs.filter.outputs.frontend_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -98,6 +189,8 @@ jobs:
         run: bin/rubocop -f github
 
   test:
+    needs: [filter]
+    if: "!cancelled() && (needs.filter.result != 'success' || (needs.filter.outputs.frontend_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -139,6 +232,8 @@ jobs:
           COVERAGE: "true"
 
   pack:
+    needs: [filter]
+    if: "!cancelled() && (needs.filter.result != 'success' || (needs.filter.outputs.frontend_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -168,8 +263,8 @@ jobs:
           fi
 
   audit_frontend:
-    needs: discover_frontends
-    if: needs.discover_frontends.outputs.has_frontends == 'true'
+    needs: [discover_frontends, filter]
+    if: "!cancelled() && needs.discover_frontends.outputs.has_frontends == 'true' && (needs.filter.result != 'success' || (needs.filter.outputs.ruby_tests_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -208,8 +303,8 @@ jobs:
         run: bin/audit-frontend
 
   check_frontend:
-    needs: discover_frontends
-    if: needs.discover_frontends.outputs.has_frontends == 'true'
+    needs: [discover_frontends, filter]
+    if: "!cancelled() && needs.discover_frontends.outputs.has_frontends == 'true' && (needs.filter.result != 'success' || (needs.filter.outputs.ruby_tests_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -248,8 +343,8 @@ jobs:
         run: bin/check
 
   test_frontend:
-    needs: discover_frontends
-    if: needs.discover_frontends.outputs.has_frontends == 'true'
+    needs: [discover_frontends, filter]
+    if: "!cancelled() && needs.discover_frontends.outputs.has_frontends == 'true' && (needs.filter.result != 'success' || (needs.filter.outputs.ruby_tests_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -290,8 +385,8 @@ jobs:
           COVERAGE: "true"
 
   e2e:
-    needs: discover_e2e
-    if: needs.discover_e2e.outputs.has_e2e == 'true'
+    needs: [discover_e2e, filter]
+    if: "!cancelled() && needs.discover_e2e.outputs.has_e2e == 'true' && (needs.filter.result != 'success' || needs.filter.outputs.skip_e2e != 'true')"
     runs-on: ubuntu-latest
     services:
       postgres:
