@@ -107,28 +107,29 @@ jobs:
             retry_delay=15
             timeout=300
             max_retries=$(( timeout / retry_delay ))
+            PREVIEW_NAME="${RENDER_SERVICE_NAME}-pr-${PR_NUMBER}"
             PREVIEW_ID=""
             for i in $(seq 1 "$max_retries"); do
-              RESPONSE=$(curl -sf \
-                "https://api.render.com/v1/services?type=web_service&includePreviews=true&limit=50" \
+              RESPONSE=$(curl -sf -G \
+                "https://api.render.com/v1/services" \
+                --data-urlencode "name=${PREVIEW_NAME}" \
+                --data-urlencode "type=web_service" \
+                --data-urlencode "includePreviews=true" \
+                --data-urlencode "limit=20" \
                 -H "Authorization: Bearer ${RENDER_API_KEY}") || {
                 echo "Render API request failed ($i/$max_retries)"
                 if [ "$i" -lt "$max_retries" ]; then sleep "$retry_delay"; fi
                 continue
               }
               PREVIEW_ID=$(printf '%s' "$RESPONSE" | jq -r \
-                --arg branch "$PR_BRANCH" \
                 --arg parent "$RENDER_SERVICE_ID" \
-                '[.[] | select(
-                  .service.branch == $branch and
-                  .service.serviceDetails.parentServer.id == $parent
-                )] | first | .service.id // empty')
+                '[.[] | select(.service.serviceDetails.parentServer.id == $parent)] | first | .service.id // empty')
               if [ -n "$PREVIEW_ID" ]; then break; fi
               echo "Preview instance not found yet ($i/$max_retries)"
               if [ "$i" -lt "$max_retries" ]; then sleep "$retry_delay"; fi
             done
             if [ -z "$PREVIEW_ID" ]; then
-              echo "::error::Could not find Render preview instance for branch ${PR_BRANCH}"
+              echo "::error::Could not find Render preview instance ${PREVIEW_NAME}"
               echo "::error::API returned: $(printf '%s' "$RESPONSE" | jq -c '[.[] | {name: .service.name, branch: .service.branch, parent: .service.serviceDetails.parentServer.id?}]')"
               exit 1
             fi
