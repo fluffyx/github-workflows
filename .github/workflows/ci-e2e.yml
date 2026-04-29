@@ -115,13 +115,32 @@ jobs:
             pnpm --dir "$dir" install --frozen-lockfile
           done
 
+      - name: Resolve Caddy arch
+        id: caddy-arch
+        run: |
+          case "${{ runner.arch }}" in
+            X64)   echo "arch=amd64" >> "$GITHUB_OUTPUT" ;;
+            ARM64) echo "arch=arm64" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Unsupported arch: ${{ runner.arch }}" >&2; exit 1 ;;
+          esac
+
+      - name: Cache Caddy binary
+        id: caddy-cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/caddy
+          key: caddy-${{ runner.os }}-${{ runner.arch }}-2.9.1
+
+      - name: Download Caddy
+        if: steps.caddy-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_${{ steps.caddy-arch.outputs.arch }}.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" caddy
+
       - name: Install Caddy
         run: |
-          sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-          sudo apt-get update
-          sudo apt-get install -y caddy
+          sudo cp "$RUNNER_TEMP/caddy" /usr/local/bin/caddy
+          sudo chmod +x /usr/local/bin/caddy
 
       - name: Cache Playwright browsers
         id: playwright-cache
