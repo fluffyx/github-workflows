@@ -12,7 +12,6 @@ permissions:
 
 jobs:
   review-pipeline:
-    name: review / review-pipeline
     runs-on: ubuntu-latest
     concurrency:
       group: >-
