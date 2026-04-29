@@ -20,6 +20,7 @@ jobs:
       - uses: fluffyx/github-workflows/actions/check-version@main
 
   filter:
+    name: ci-filter
     runs-on: ubuntu-latest
     outputs:
       frontend_only: ${{ steps.classify.outputs.frontend_only }}

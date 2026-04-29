@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   filter:
+    name: ci-filter
     runs-on: ubuntu-latest
     outputs:
       ruby_tests_only: ${{ steps.classify.outputs.ruby_tests_only }}
