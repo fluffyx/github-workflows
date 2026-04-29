@@ -38,7 +38,7 @@ fi
 # Trims surrounding whitespace and any "— date" / "- date" trailing tail. ---
 extract_heading() {
   sed -nE 's/^##[[:space:]]+\[?([^]]+)\]?.*/\1/p' "$1" \
-    | sed -E 's/[[:space:]]+[—–-].*//' \
+    | sed -E 's/[[:space:]]+[—–\-].*//' \
     | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//'
 }
 
@@ -102,30 +102,32 @@ while IFS= read -r h; do
 done < <(extract_heading CHANGELOG.md)
 
 # --- Check [Unreleased] position ---
-for i in "${!all_headings[@]}"; do
-  if echo "${all_headings[$i]}" | grep -qi '^unreleased'; then
-    if [ "$i" -ne 0 ]; then
-      hint "[Unreleased] must be the first heading in CHANGELOG.md, but it appears at position $((i+1)). Move '## [Unreleased]' above all version headings"
+if [ ${#all_headings[@]} -gt 0 ]; then
+  for i in "${!all_headings[@]}"; do
+    if echo "${all_headings[$i]}" | grep -qi '^unreleased'; then
+      if [ "$i" -ne 0 ]; then
+        hint "[Unreleased] must be the first heading in CHANGELOG.md, but it appears at position $((i+1)). Move '## [Unreleased]' above all version headings"
+      fi
     fi
-  fi
-done
+  done
+fi
 
 # --- Strip Unreleased from headings used for version checks ---
 raw_headings=()
-for h in "${all_headings[@]}"; do
+for h in "${all_headings[@]+"${all_headings[@]}"}"; do
   if ! echo "$h" | grep -qi '^unreleased'; then
     raw_headings+=("$h")
   fi
 done
 
-for h in "${raw_headings[@]}"; do
+for h in "${raw_headings[@]+"${raw_headings[@]}"}"; do
   if [[ "$h" =~ ^v ]]; then
     hint "CHANGELOG.md heading has v-prefix: '$h'. Remove the 'v', e.g. change '## [$h]' to '## [${h#v}]'"
   fi
 done
 
 headings=()
-for h in "${raw_headings[@]}"; do
+for h in "${raw_headings[@]+"${raw_headings[@]}"}"; do
   headings+=("${h#v}")
 done
 
@@ -134,7 +136,7 @@ changelog_format=""
 if [ ${#headings[@]} -gt 0 ]; then
   semver_count=0
   date_count=0
-  for h in "${headings[@]}"; do
+  for h in "${headings[@]+"${headings[@]}"}"; do
     if [[ "$h" =~ $semver_re ]]; then
       semver_count=$((semver_count + 1))
     elif [[ "$h" =~ $date_re ]]; then
@@ -155,19 +157,19 @@ echo "Changelog format: ${changelog_format:-none detected}"
 
 # --- Validate headings based on format ---
 if [ "$changelog_format" = "semver" ]; then
-  for h in "${headings[@]}"; do
+  for h in "${headings[@]+"${headings[@]}"}"; do
     if [[ ! "$h" =~ $semver_re ]]; then
       hint "CHANGELOG.md heading '$h' is not valid semver. Expected: '## [1.2.3]', '## [1.2.3-beta.1]', or '## [1.2.3] — 2026-04-12'"
     fi
   done
 elif [ "$changelog_format" = "date" ]; then
-  for h in "${headings[@]}"; do
+  for h in "${headings[@]+"${headings[@]}"}"; do
     if [[ ! "$h" =~ $date_re ]]; then
       hint "CHANGELOG.md heading '$h' is not a valid date. Expected format: '## [2026-04-12]' (YYYY-MM-DD)"
     fi
   done
 else
-  for h in "${headings[@]}"; do
+  for h in "${headings[@]+"${headings[@]}"}"; do
     if [[ ! "$h" =~ $semver_re ]] && [[ ! "$h" =~ $date_re ]]; then
       hint "CHANGELOG.md heading '$h' is not recognized. Use '## [1.2.3]', '## [1.2.3-beta.1]', '## [1.2.3] — 2026-04-12', or '## [2026-04-12]'"
     fi
