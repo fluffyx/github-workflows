@@ -51,10 +51,11 @@ jobs:
             [ -d "${dir}tests/e2e" ] || continue
             suites+=("${dir%/}")
           done
+          shards_n=$(( ${{ inputs.e2e_shards }} > 0 ? ${{ inputs.e2e_shards }} : 1 ))
           if [ ${#suites[@]} -gt 0 ] && [ -x bin/dev-e2e ]; then
             echo "has_e2e=true" >> "$GITHUB_OUTPUT"
             echo "suites=$(jq -cn '$ARGS.positional' --args "${suites[@]}")" >> "$GITHUB_OUTPUT"
-            echo "shards=$(jq -cn '[range(1; $n+1)]' --argjson n '${{ inputs.e2e_shards }}')" >> "$GITHUB_OUTPUT"
+            echo "shards=$(jq -cn '[range(1; $n+1)]' --argjson n "$shards_n")" >> "$GITHUB_OUTPUT"
           else
             echo "has_e2e=false" >> "$GITHUB_OUTPUT"
             echo "suites=[]" >> "$GITHUB_OUTPUT"
