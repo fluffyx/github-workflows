@@ -8,6 +8,7 @@ Reusable GitHub Actions workflows for `fluffyx/*` repositories.
 |----------|------|-----|
 | **CI (Rails)** | `ci-rails.yml` | Rails + SvelteKit apps |
 | **CI (Frontend)** | `ci-frontend.yml` | Pure frontend / component library repos |
+| **PR Title** | `pr-title.yml` | Enforce conventional commit PR titles |
 | **Review Pipeline** | `charlie-review.yml` | Charlie auto-review on PRs |
 
 ## Required bin scripts
@@ -20,9 +21,11 @@ These workflows delegate to bin scripts in your repo. Each repo decides what "ch
 | `bin/test-frontend` | Frontend codegen + tests. | `ci-rails` | `pnpm codegen && pnpm test` |
 | `bin/audit-frontend` | Dependency audit across frontend dirs. | `ci-rails` | `pnpm audit` per frontend dir |
 | `bin/lint` | Auto-fix (transforms files). For developers and lefthook. | (not called by CI) | `prettier --write . && eslint --fix .` |
+| `bin/typecheck` | Fast read-only typecheck (no lint). For lefthook pre-commit. | (not called by CI) | `pnpm check` (svelte-check) or `tsc --noEmit` |
 | `bin/rubocop` | RuboCop wrapper. | `ci-rails` | `bundle exec rubocop "$@"` |
 | `bin/brakeman` | Brakeman wrapper. | `ci-rails` | `bundle exec brakeman "$@"` |
 | `bin/bundler-audit` | Bundler Audit wrapper. | `ci-rails` | `bundle exec bundler-audit check --update` |
+| `bin/e2e` | Start dev stack and run Playwright E2E tests. | `ci-rails` | Starts Rails + frontend dev servers, runs Playwright serially per `frontend*/tests/e2e/` dir |
 
 ### Multi-frontend repos
 
@@ -32,7 +35,19 @@ Rails apps use `frontend*/` directories at the repo root (e.g. `frontend/`, `fro
 
 Full CI for Rails apps that may include one or more SvelteKit frontends.
 
-**Jobs:** `check-version`, `scan_ruby`, `lint` (RuboCop), `test` (RSpec + Postgres), `pack` (gem build dry-run, skips if no gemspec), `audit_frontend`, `check_frontend`, `test_frontend`. The frontend jobs are skipped automatically if no `frontend/` or `frontend-*` directories exist.
+**Jobs:** `check-version`, `scan_ruby`, `lint` (RuboCop), `test` (RSpec + Postgres), `pack` (gem build dry-run, skips if no gemspec), `audit_frontend`, `check_frontend`, `test_frontend`, `e2e` (Playwright). The frontend jobs are skipped automatically if no `frontend/` or `frontend-*` directories exist. The `e2e` job is skipped if no `frontend*/tests/e2e/` directories or `bin/e2e` script exist.
+
+### E2E secrets
+
+The `e2e` job expects these secrets in the consuming repo (via `secrets: inherit`):
+
+| Secret | Used as env var |
+|--------|----------------|
+| `STRIPE_TEST_SECRET_KEY` | `STRIPE_SECRET_KEY` |
+| `STRIPE_TEST_PUBLISHABLE_KEY` | `VITE_STRIPE_PUBLISHABLE_KEY` |
+| `GH_PACKAGES_TOKEN` | `GH_PACKAGES_TOKEN` + `BUNDLE_RUBYGEMS__PKG__GITHUB__COM` |
+
+The job also installs Caddy (reverse proxy for multi-frontend dev servers) and caches Playwright browser binaries.
 
 ### Caller example
 
@@ -77,6 +92,22 @@ jobs:
 |-------|------|---------|-------------|
 | `e2e` | `boolean` | `false` | Run Playwright e2e tests |
 
+## PR Title
+
+Enforces conventional commit format on PR titles using `amannn/action-semantic-pull-request`. Allowed types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`. Scopes are optional and unrestricted.
+
+### Caller example
+
+```yaml
+name: PR Title
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+jobs:
+  check:
+    uses: fluffyx/github-workflows/.github/workflows/pr-title.yml@main
+```
+
 ## Review Pipeline
 
 Prepares PR state labels, clears previous review-pipeline labels on each new PR push, and requests a review from the `CharlieHelps` GitHub user.
@@ -87,7 +118,7 @@ Prepares PR state labels, clears previous review-pipeline labels on each new PR 
 name: Charlie Review
 on:
   pull_request:
-    types: [opened, reopened, synchronize]
+    types: [opened, reopened, synchronize, ready_for_review]
 permissions:
   contents: read
   issues: write
@@ -123,6 +154,81 @@ Both CI workflows automatically run a version sync check (`check-version` job). 
 - **Skips** version cross-reference (apps typically have no version files to compare)
 
 No configuration needed — it runs automatically for all repos using these workflows. The format is detected from your existing headings.
+
+### Run the same check locally via lefthook
+
+The version-sync logic also runs as a pre-push lefthook hook so you don't have to wait for CI to find a CHANGELOG/version mismatch. See **Shared lefthook configs** below.
+
+## Shared lefthook configs
+
+Three preset configs at the root of this repo, each pulled in via lefthook's `remotes:` feature. Mix and match — Rails apps with frontends consume all three:
+
+| Preset | Hook | Jobs |
+|--------|------|------|
+| `lefthook-shared.yml` | `pre-push` | `check-version` (same logic as CI) |
+| `lefthook-frontend.yml` | `pre-commit` | `frontend-lint` (`bin/lint`), `frontend-typecheck` (`bin/typecheck`), `node-modules-freshness`, `lockfile-frozen` |
+| `lefthook-rails.yml` | `pre-commit` | `rubocop` (autofix on staged Ruby files) |
+
+### Consumer wiring
+
+```yaml
+# Frontend-only repo (e.g. fx-glass)
+remotes:
+  - git_url: https://github.com/fluffyx/github-workflows
+    ref: main
+    refetch_frequency: 24h
+    configs:
+      - lefthook-shared.yml
+      - lefthook-frontend.yml
+```
+
+```yaml
+# Rails app with one or more frontend*/ subdirs (e.g. billiedoby)
+remotes:
+  - git_url: https://github.com/fluffyx/github-workflows
+    ref: main
+    refetch_frequency: 24h
+    configs:
+      - lefthook-shared.yml
+      - lefthook-frontend.yml
+      - lefthook-rails.yml
+```
+
+Then run `lefthook install` once. Local jobs in the consumer's own `lefthook.yml` are merged with the remote ones; same-named jobs are overridden by local. `refetch_frequency: 24h` keeps each consumer in sync with upstream changes without fetching on every push.
+
+### Required `bin/` scripts in the consumer
+
+The frontend preset assumes the conventions documented under **Required bin scripts** above:
+
+- `bin/lint` — auto-fix (called with `{staged_files}` as args)
+- `bin/typecheck` — read-only typecheck. If your project doesn't have one yet, a 2-line shim is enough:
+  ```bash
+  #!/usr/bin/env bash
+  exec pnpm check "$@"
+  ```
+
+### Portability
+
+The `check-version.sh` script (and any future shared scripts) is portable across macOS (bash 3.2 + BSD coreutils) and Linux (CI). No `brew install bash` or GNU grep required on developer machines beyond `lefthook` itself.
+
+### Overriding a single job
+
+To keep all the shared jobs but tweak one (e.g. fx-glass's prettier-only lint flow), redeclare it under the same name in the consumer's local config:
+
+```yaml
+# consumer's lefthook.yml
+remotes:
+  - git_url: https://github.com/fluffyx/github-workflows
+    configs: [lefthook-shared.yml, lefthook-frontend.yml]
+
+pre-commit:
+  jobs:
+    - name: frontend-lint           # overrides the remote's frontend-lint
+      glob: "**/*.{ts,svelte}"
+      run: pnpm prettier --write {staged_files}
+      exclude: "src/lib/components/theme/ThemeInitScript.svelte"
+      stage_fixed: true
+```
 
 ## Dependency audit
 

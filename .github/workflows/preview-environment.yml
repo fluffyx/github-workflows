@@ -12,7 +12,7 @@ on:
         type: string
         required: true
       vercel_project_ids:
-        description: 'JSON array of {name, var_name, build_env?} objects for each frontend app. var_name is the name of a repository variable holding the Vercel project ID.'
+        description: 'JSON array of {name, var_name} objects for each frontend app. var_name is the name of a repository variable holding the Vercel project ID.'
         type: string
         required: true
       label_name:
@@ -40,6 +40,10 @@ permissions:
   deployments: write
   pull-requests: write
 
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   deploy-preview:
     if: |
@@ -59,90 +63,15 @@ jobs:
           project_id: ${{ secrets.NEON_PROJECT_ID }}
           api_key: ${{ secrets.NEON_API_KEY }}
           branch_name: preview/pr-${{ github.event.pull_request.number }}
-          # username omitted — defaults to the project's default role (neondb_owner)
 
-      - name: Find Render preview instance
-        id: render
+      - name: Validate Neon branch
         env:
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
-          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          DB_URL: ${{ steps.neon.outputs.db_url }}
         run: |
-          retry_delay=15
-          timeout=300
-          max_retries=$(( timeout / retry_delay ))
-          for i in $(seq 1 "$max_retries"); do
-            PREVIEW_ID=""
-            CURSOR=""
-            while true; do
-              URL="https://api.render.com/v1/services?type=web_service&includePreviews=true&limit=100"
-              if [ -n "$CURSOR" ]; then
-                URL="${URL}&cursor=${CURSOR}"
-              fi
-              RESPONSE=$(curl -sf "$URL" \
-                -H "Authorization: Bearer ${RENDER_API_KEY}") || {
-                echo "Render API request failed ($i/$max_retries)"
-                if [ "$i" -lt "$max_retries" ]; then sleep "$retry_delay"; fi
-                continue 2
-              }
-              PREVIEW_ID=$(printf '%s' "$RESPONSE" | jq -r \
-                --arg branch "$PR_BRANCH" \
-                --arg parent "$RENDER_SERVICE_ID" \
-                '[.[] | select(
-                  .service.branch == $branch and
-                  .service.serviceDetails.parentServer.id == $parent
-                )] | first | .service.id // empty')
-              if [ -n "$PREVIEW_ID" ]; then break; fi
-              CURSOR=$(printf '%s' "$RESPONSE" | jq -r '.[-1].cursor // empty')
-              if [ -z "$CURSOR" ] || [ "$(printf '%s' "$RESPONSE" | jq 'length')" -lt 100 ]; then
-                break
-              fi
-            done
-            if [ -n "$PREVIEW_ID" ]; then break; fi
-            echo "Preview instance not found yet ($i/$max_retries)"
-            if [ "$i" -lt "$max_retries" ]; then sleep "$retry_delay"; fi
-          done
-          if [ -z "$PREVIEW_ID" ]; then
-            echo "::error::Could not find Render preview instance for branch ${PR_BRANCH}"
-            if [ -n "$RESPONSE" ]; then
-              echo "::error::API returned: $(printf '%s' "$RESPONSE" | jq -c '[.[] | {name: .service.name, branch: .service.branch, parent: .service.serviceDetails.parentServer.id?}]')"
-            fi
+          if [ -z "$DB_URL" ]; then
+            echo "::error::Neon branch created but db_url output is empty"
             exit 1
           fi
-          echo "Found preview instance: ${PREVIEW_ID}"
-          printf 'preview_service_id=%s\n' "$PREVIEW_ID" >> "$GITHUB_OUTPUT"
-
-      - name: Configure Render preview env vars
-        env:
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-          PREVIEW_SERVICE_ID: ${{ steps.render.outputs.preview_service_id }}
-          DATABASE_URL: ${{ steps.neon.outputs.db_url }}
-          PREVIEW_ORIGIN_REGEX: ${{ inputs.preview_origin_regex }}
-        run: |
-          set_env_var() {
-            local payload
-            payload=$(jq -n --arg v "$2" '{value: $v}')
-            curl -sf -X PUT \
-              "https://api.render.com/v1/services/${PREVIEW_SERVICE_ID}/env-vars/$1" \
-              -H "Authorization: Bearer ${RENDER_API_KEY}" \
-              -H "Content-Type: application/json" \
-              -d "$payload" || exit 1
-          }
-          set_env_var DATABASE_URL "${DATABASE_URL}"
-          set_env_var PREVIEW_ORIGIN_REGEX "${PREVIEW_ORIGIN_REGEX}"
-          set_env_var SENTRY_ENVIRONMENT preview
-          set_env_var PREVIEW_DB_CONFIGURED true
-
-      - name: Trigger Render preview redeploy
-        env:
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-          PREVIEW_SERVICE_ID: ${{ steps.render.outputs.preview_service_id }}
-        run: |
-          curl -sf -X POST \
-            "https://api.render.com/v1/services/${PREVIEW_SERVICE_ID}/deploys" \
-            -H "Authorization: Bearer ${RENDER_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d '{}' || exit 1
 
       - uses: actions/setup-node@v6
         with:
@@ -155,9 +84,13 @@ jobs:
           printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
           printf 'NPM_CONFIG_USERCONFIG=%s/.npmrc\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
 
-      - name: Deploy to Vercel
-        id: vercel
+      - name: Deploy Render and Vercel
+        id: deploy
         env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          DATABASE_URL: ${{ steps.neon.outputs.db_url }}
+          PREVIEW_ORIGIN_REGEX: ${{ inputs.preview_origin_regex }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           ALL_VARS: ${{ toJSON(vars) }}
@@ -168,6 +101,75 @@ jobs:
           RENDER_SERVICE_NAME: ${{ inputs.render_service_name }}
           VERCEL_PROJECTS: ${{ inputs.vercel_project_ids }}
         run: |
+          # --- Render (background) ---
+          (
+            retry_delay=15
+            timeout=300
+            max_retries=$(( timeout / retry_delay ))
+            for i in $(seq 1 "$max_retries"); do
+              PREVIEW_ID=""
+              CURSOR=""
+              while true; do
+                URL="https://api.render.com/v1/services?type=web_service&includePreviews=true&limit=100"
+                if [ -n "$CURSOR" ]; then
+                  URL="${URL}&cursor=${CURSOR}"
+                fi
+                RESPONSE=$(curl -sf "$URL" \
+                  -H "Authorization: Bearer ${RENDER_API_KEY}") || {
+                  echo "Render API request failed ($i/$max_retries)"
+                  if [ "$i" -lt "$max_retries" ]; then sleep "$retry_delay"; fi
+                  continue 2
+                }
+                PREVIEW_ID=$(printf '%s' "$RESPONSE" | jq -r \
+                  --arg branch "$PR_BRANCH" \
+                  --arg parent "$RENDER_SERVICE_ID" \
+                  '[.[] | select(
+                    .service.branch == $branch and
+                    .service.serviceDetails.parentServer.id == $parent
+                  )] | first | .service.id // empty')
+                if [ -n "$PREVIEW_ID" ]; then break; fi
+                CURSOR=$(printf '%s' "$RESPONSE" | jq -r '.[-1].cursor // empty')
+                if [ -z "$CURSOR" ] || [ "$(printf '%s' "$RESPONSE" | jq 'length')" -lt 100 ]; then
+                  break
+                fi
+              done
+              if [ -n "$PREVIEW_ID" ]; then break; fi
+              echo "Preview instance not found yet ($i/$max_retries)"
+              if [ "$i" -lt "$max_retries" ]; then sleep "$retry_delay"; fi
+            done
+            if [ -z "$PREVIEW_ID" ]; then
+              echo "::error::Could not find Render preview instance for branch ${PR_BRANCH}"
+              if [ -n "$RESPONSE" ]; then
+                echo "::error::API returned: $(printf '%s' "$RESPONSE" | jq -c '[.[] | {name: .service.name, branch: .service.branch, parent: .service.serviceDetails.parentServer.id?}]')"
+              fi
+              exit 1
+            fi
+            echo "Found preview instance: ${PREVIEW_ID}"
+
+            set_env_var() {
+              local payload
+              payload=$(jq -n --arg v "$2" '{value: $v}')
+              curl -sf -X PUT \
+                "https://api.render.com/v1/services/${PREVIEW_ID}/env-vars/$1" \
+                -H "Authorization: Bearer ${RENDER_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "$payload" || exit 1
+            }
+            set_env_var DATABASE_URL "${DATABASE_URL}"
+            set_env_var PREVIEW_ORIGIN_REGEX "${PREVIEW_ORIGIN_REGEX}"
+            set_env_var SENTRY_ENVIRONMENT preview
+            set_env_var PREVIEW_DB_CONFIGURED true
+
+            curl -sf -X POST \
+              "https://api.render.com/v1/services/${PREVIEW_ID}/deploys" \
+              -H "Authorization: Bearer ${RENDER_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d '{}' || exit 1
+          ) &
+          RENDER_PID=$!
+          trap 'kill $RENDER_PID 2>/dev/null || true; wait $RENDER_PID 2>/dev/null || true' EXIT
+
+          # --- Vercel (foreground) ---
           printf '%s' "$VERCEL_PROJECTS" | jq empty || { echo "::error::Invalid JSON in vercel_project_ids"; exit 1; }
           RENDER_HOST="${RENDER_SERVICE_NAME}-pr-${PR_NUMBER}.onrender.com"
           RESULTS="[]"
@@ -179,10 +181,9 @@ jobs:
               echo "::error::Variable ${VAR_NAME} not found for project ${NAME}"
               exit 1
             fi
-            BUILD_ENV=$(printf '%s' "$project" | jq -r '.build_env // "VITE_API_DOMAIN"')
             export VERCEL_PROJECT_ID="$PROJECT_ID"
             URL=$(npx vercel deploy --token "$VERCEL_TOKEN" --yes --no-clipboard \
-              --build-env "${BUILD_ENV}=${RENDER_HOST}" \
+              --env "API_BACKEND_URL=https://${RENDER_HOST}" \
               --meta githubCommitRef="${PR_BRANCH}" \
               --meta githubCommitSha="${PR_SHA}" \
               --meta githubCommitMessage="PR #${PR_NUMBER}: ${PR_TITLE}" \
@@ -191,10 +192,18 @@ jobs:
           done < <(printf '%s' "$VERCEL_PROJECTS" | jq -c '.[]')
           printf 'urls=%s\n' "$RESULTS" >> "$GITHUB_OUTPUT"
 
+          # --- Wait for Render ---
+          render_result=0
+          wait $RENDER_PID || render_result=$?
+          if [ "$render_result" -ne 0 ]; then
+            echo "::error::Render deploy failed"
+            exit 1
+          fi
+
       - name: Create GitHub deployments for Vercel previews
         uses: actions/github-script@v7
         env:
-          VERCEL_URLS: ${{ steps.vercel.outputs.urls }}
+          VERCEL_URLS: ${{ steps.deploy.outputs.urls }}
         with:
           script: |
             const vercelUrls = JSON.parse(process.env.VERCEL_URLS);
