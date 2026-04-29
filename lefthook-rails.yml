@@ -1,0 +1,11 @@
+# Shared Rails pre-commit checks for fluffyx repos.
+#
+# Combine with lefthook-frontend.yml for Rails apps that ship one or more
+# SvelteKit frontends in frontend*/ subdirs.
+
+pre-commit:
+  jobs:
+    - name: rubocop
+      glob: "*.rb"
+      run: bundle exec rubocop -a --force-exclusion {staged_files}
+      stage_fixed: true

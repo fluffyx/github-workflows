@@ -2,6 +2,10 @@ name: CI (Rails)
 
 on:
   workflow_call:
+    inputs:
+      e2e_shards:
+        type: number
+        default: 1
 
 permissions:
   contents: read
@@ -121,16 +125,27 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       has_e2e: ${{ steps.find.outputs.has_e2e }}
+      suites: ${{ steps.find.outputs.suites }}
+      shards: ${{ steps.find.outputs.shards }}
     steps:
       - uses: actions/checkout@v6
 
       - name: Check for E2E tests
         id: find
         run: |
-          if [ -x bin/e2e ] && ls -d frontend*/tests/e2e/ >/dev/null 2>&1; then
+          suites=()
+          for dir in frontend*/; do
+            [ -d "${dir}tests/e2e" ] || continue
+            suites+=("${dir%/}")
+          done
+          if [ ${#suites[@]} -gt 0 ] && [ -x bin/dev-e2e ]; then
             printf 'has_e2e=true\n' >> "$GITHUB_OUTPUT"
+            printf 'suites=%s\n' "$(jq -cn '$ARGS.positional' --args "${suites[@]}")" >> "$GITHUB_OUTPUT"
+            printf 'shards=%s\n' "$(jq -cn '[range(1; $n+1)]' --argjson n '${{ inputs.e2e_shards }}')" >> "$GITHUB_OUTPUT"
           else
             printf 'has_e2e=false\n' >> "$GITHUB_OUTPUT"
+            printf 'suites=[]\n' >> "$GITHUB_OUTPUT"
+            printf 'shards=[1]\n' >> "$GITHUB_OUTPUT"
           fi
 
   scan_ruby:
@@ -387,6 +402,11 @@ jobs:
   e2e:
     needs: [discover_e2e, filter]
     if: "!cancelled() && needs.discover_e2e.outputs.has_e2e == 'true' && (needs.filter.result != 'success' || needs.filter.outputs.skip_e2e != 'true')"
+    strategy:
+      fail-fast: true
+      matrix:
+        suite: ${{ fromJson(needs.discover_e2e.outputs.suites) }}
+        shard: ${{ fromJson(needs.discover_e2e.outputs.shards) }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -407,8 +427,8 @@ jobs:
       DB_PASSWORD: postgres
       RAILS_ENV: test
       DEV_PORT: "4100"
-      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-      VITE_STRIPE_PUBLISHABLE_KEY: ${{ secrets.VITE_STRIPE_PUBLISHABLE_KEY }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+      VITE_STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_TEST_PUBLISHABLE_KEY }}
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
       BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
     steps:
@@ -480,17 +500,34 @@ jobs:
             pnpm --dir "$dir" codegen 2>/dev/null || true
           done
 
+      - name: Start dev server
+        run: |
+          mkdir -p tmp/logs
+          setsid bin/dev-e2e </dev/null >tmp/logs/dev-e2e.log 2>&1 &
+          echo "DEV_E2E_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for dev server
+        run: |
+          timeout 120 bash -c "until curl -sf http://app.lvh.me:${DEV_PORT} > /dev/null 2>&1; do sleep 2; done"
+
       - name: Run E2E tests
-        run: bin/e2e
+        run: |
+          (cd "${{ matrix.suite }}" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ inputs.e2e_shards }} --bail 1)
         env:
           CI: "true"
+          DEV_E2E_RUNNING: "true"
 
       - name: Upload test artifacts
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-results
+          name: e2e-results-${{ matrix.suite }}-shard${{ matrix.shard }}
           path: |
             frontend*/test-results/
             tmp/logs/
           retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Stop dev server
+        if: always()
+        run: kill -- "-$DEV_E2E_PID" 2>/dev/null || kill "$DEV_E2E_PID" 2>/dev/null || true
