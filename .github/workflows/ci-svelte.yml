@@ -6,9 +6,11 @@ on:
 permissions:
   contents: read
   packages: read
+  pull-requests: read
 
 jobs:
   filter:
+    name: ci-filter
     runs-on: ubuntu-latest
     outputs:
       ruby_tests_only: ${{ steps.classify.outputs.ruby_tests_only }}
