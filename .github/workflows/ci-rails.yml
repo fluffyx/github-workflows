@@ -417,7 +417,7 @@ jobs:
 
       - name: Run E2E tests
         run: |
-          (cd "${{ matrix.suite }}" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ inputs.e2e_shards }} --bail 1)
+          (cd "${{ matrix.suite }}" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ inputs.e2e_shards }} --max-failures 1)
         env:
           CI: "true"
           DEV_E2E_RUNNING: "true"
