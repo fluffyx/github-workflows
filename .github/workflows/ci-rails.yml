@@ -424,4 +424,4 @@ jobs:
 
       - name: Stop dev server
         if: always()
-        run: kill -- -"$DEV_E2E_PID" 2>/dev/null || kill "$DEV_E2E_PID" 2>/dev/null || true
+        run: kill -- "-$DEV_E2E_PID" 2>/dev/null || kill "$DEV_E2E_PID" 2>/dev/null || true
