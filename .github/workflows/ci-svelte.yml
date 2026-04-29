@@ -19,7 +19,7 @@ jobs:
       - name: Find frontend directories
         id: find
         run: |
-          if ls -d frontend frontend-* >/dev/null 2>&1; then
+          if compgen -G 'frontend*/' > /dev/null 2>&1; then
             echo "has_frontends=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_frontends=false" >> "$GITHUB_OUTPUT"
