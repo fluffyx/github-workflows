@@ -2,6 +2,10 @@ name: CI (Rails)
 
 on:
   workflow_call:
+    inputs:
+      e2e_shards:
+        type: number
+        default: 1
 
 permissions:
   contents: read
@@ -34,16 +38,27 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       has_e2e: ${{ steps.find.outputs.has_e2e }}
+      suites: ${{ steps.find.outputs.suites }}
+      shards: ${{ steps.find.outputs.shards }}
     steps:
       - uses: actions/checkout@v6
 
       - name: Check for E2E tests
         id: find
         run: |
-          if [ -x bin/dev-e2e ] && ls -d frontend*/tests/e2e/ >/dev/null 2>&1; then
+          suites=()
+          for dir in frontend*/; do
+            [ -d "${dir}tests/e2e" ] || continue
+            suites+=("${dir%/}")
+          done
+          if [ ${#suites[@]} -gt 0 ] && [ -x bin/dev-e2e ]; then
             echo "has_e2e=true" >> "$GITHUB_OUTPUT"
+            echo "suites=$(jq -cn '$ARGS.positional' --args "${suites[@]}")" >> "$GITHUB_OUTPUT"
+            echo "shards=$(jq -cn '[range(1; $n+1)]' --argjson n '${{ inputs.e2e_shards }}')" >> "$GITHUB_OUTPUT"
           else
             echo "has_e2e=false" >> "$GITHUB_OUTPUT"
+            echo "suites=[]" >> "$GITHUB_OUTPUT"
+            echo "shards=[1]" >> "$GITHUB_OUTPUT"
           fi
 
   scan_ruby:
@@ -292,6 +307,11 @@ jobs:
   e2e:
     needs: discover_e2e
     if: needs.discover_e2e.outputs.has_e2e == 'true'
+    strategy:
+      fail-fast: true
+      matrix:
+        suite: ${{ fromJson(needs.discover_e2e.outputs.suites) }}
+        shard: ${{ fromJson(needs.discover_e2e.outputs.shards) }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -397,16 +417,7 @@ jobs:
 
       - name: Run E2E tests
         run: |
-          if [ -x bin/e2e ]; then
-            bin/e2e
-          else
-            set -e
-            for dir in frontend*/; do
-              [ -d "${dir}tests/e2e" ] || continue
-              echo "==> E2E: $dir"
-              (cd "$dir" && npx playwright test --config tests/e2e/playwright.config.ts)
-            done
-          fi
+          (cd "${{ matrix.suite }}" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ inputs.e2e_shards }} --bail 1)
         env:
           CI: "true"
           DEV_E2E_RUNNING: "true"
@@ -415,7 +426,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-results
+          name: e2e-results-${{ matrix.suite }}-shard${{ matrix.shard }}
           path: |
             frontend*/test-results/
             tmp/logs/
