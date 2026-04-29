@@ -6,7 +6,6 @@ on:
 permissions:
   contents: read
   packages: read
-  pull-requests: read
 
 jobs:
   check-version:
@@ -27,6 +26,7 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: paths
         with:
+          token: ''
           base: ${{ github.base_ref || github.event.repository.default_branch || 'main' }}
           filters: |
             frontend:
