@@ -8,6 +8,7 @@ Reusable GitHub Actions workflows for `fluffyx/*` repositories.
 |----------|------|-----|
 | **CI (Rails)** | `ci-rails.yml` | Rails + SvelteKit apps |
 | **CI (Frontend)** | `ci-frontend.yml` | Pure frontend / component library repos |
+| **PR Title** | `pr-title.yml` | Enforce conventional commit PR titles |
 | **Review Pipeline** | `charlie-review.yml` | Charlie auto-review on PRs |
 
 ## Required bin scripts
@@ -23,6 +24,7 @@ These workflows delegate to bin scripts in your repo. Each repo decides what "ch
 | `bin/rubocop` | RuboCop wrapper. | `ci-rails` | `bundle exec rubocop "$@"` |
 | `bin/brakeman` | Brakeman wrapper. | `ci-rails` | `bundle exec brakeman "$@"` |
 | `bin/bundler-audit` | Bundler Audit wrapper. | `ci-rails` | `bundle exec bundler-audit check --update` |
+| `bin/e2e` | Start dev stack and run Playwright E2E tests. | `ci-rails` | Starts Rails + frontend dev servers, runs Playwright serially per `frontend*/tests/e2e/` dir |
 
 ### Multi-frontend repos
 
@@ -32,7 +34,19 @@ Rails apps use `frontend*/` directories at the repo root (e.g. `frontend/`, `fro
 
 Full CI for Rails apps that may include one or more SvelteKit frontends.
 
-**Jobs:** `check-version`, `scan_ruby`, `lint` (RuboCop), `test` (RSpec + Postgres), `pack` (gem build dry-run, skips if no gemspec), `audit_frontend`, `check_frontend`, `test_frontend`. The frontend jobs are skipped automatically if no `frontend/` or `frontend-*` directories exist.
+**Jobs:** `check-version`, `scan_ruby`, `lint` (RuboCop), `test` (RSpec + Postgres), `pack` (gem build dry-run, skips if no gemspec), `audit_frontend`, `check_frontend`, `test_frontend`, `e2e` (Playwright). The frontend jobs are skipped automatically if no `frontend/` or `frontend-*` directories exist. The `e2e` job is skipped if no `frontend*/tests/e2e/` directories or `bin/e2e` script exist.
+
+### E2E secrets
+
+The `e2e` job expects these secrets in the consuming repo (via `secrets: inherit`):
+
+| Secret | Used as env var |
+|--------|----------------|
+| `STRIPE_TEST_SECRET_KEY` | `STRIPE_SECRET_KEY` |
+| `STRIPE_TEST_PUBLISHABLE_KEY` | `VITE_STRIPE_PUBLISHABLE_KEY` |
+| `GH_PACKAGES_TOKEN` | `GH_PACKAGES_TOKEN` + `BUNDLE_RUBYGEMS__PKG__GITHUB__COM` |
+
+The job also installs Caddy (reverse proxy for multi-frontend dev servers) and caches Playwright browser binaries.
 
 ### Caller example
 
@@ -76,6 +90,22 @@ jobs:
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
 | `e2e` | `boolean` | `false` | Run Playwright e2e tests |
+
+## PR Title
+
+Enforces conventional commit format on PR titles using `amannn/action-semantic-pull-request`. Allowed types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`. Scopes are optional and unrestricted.
+
+### Caller example
+
+```yaml
+name: PR Title
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+jobs:
+  check:
+    uses: fluffyx/github-workflows/.github/workflows/pr-title.yml@main
+```
 
 ## Review Pipeline
 
