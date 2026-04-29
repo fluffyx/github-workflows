@@ -360,11 +360,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y caddy
 
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend*/pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
+
       - name: Install Playwright browsers
         run: |
           for dir in frontend*/; do
             [ -f "$dir/package.json" ] || continue
-            pnpm --dir "$dir" exec playwright install --with-deps chromium
+            pnpm --dir "$dir" exec playwright install ${{ steps.playwright-cache.outputs.cache-hit == 'true' && 'chromium' || '--with-deps chromium' }}
           done
 
       - name: Prepare database
