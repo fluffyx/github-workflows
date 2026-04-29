@@ -115,13 +115,19 @@ jobs:
             pnpm --dir "$dir" install --frozen-lockfile
           done
 
+      - name: Cache Caddy binary
+        id: caddy-cache
+        uses: actions/cache@v5
+        with:
+          path: /usr/local/bin/caddy
+          key: caddy-${{ runner.os }}-2.9.1
+
       - name: Install Caddy
+        if: steps.caddy-cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-          sudo apt-get update
-          sudo apt-get install -y caddy
+          curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin caddy
+          sudo chmod +x /usr/local/bin/caddy
 
       - name: Cache Playwright browsers
         id: playwright-cache
