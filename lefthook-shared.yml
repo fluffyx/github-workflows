@@ -1,0 +1,19 @@
+# Shared lefthook hooks for fluffyx projects.
+#
+# Consume from a project by adding to its local lefthook.yml:
+#
+#   remotes:
+#     - git_url: https://github.com/fluffyx/github-workflows
+#       ref: main
+#       refetch_frequency: 24h
+#       configs:
+#         - lefthook-shared.yml
+#
+# Local hooks defined in the consumer's lefthook.yml are merged with the
+# ones declared here, so each project can still add its own checks.
+
+pre-push:
+  scripts:
+    "check-version.sh":
+      runner: bash
+      fail_text: "Version sync check failed — fix the issues above before pushing."

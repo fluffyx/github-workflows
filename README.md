@@ -154,6 +154,23 @@ Both CI workflows automatically run a version sync check (`check-version` job). 
 
 No configuration needed — it runs automatically for all repos using these workflows. The format is detected from your existing headings.
 
+### Run the same check locally via lefthook
+
+The version-sync logic also runs as a pre-push lefthook hook so you don't have to wait for CI to find a CHANGELOG/version mismatch. Consume it from any repo by adding to its `lefthook.yml`:
+
+```yaml
+remotes:
+  - git_url: https://github.com/fluffyx/github-workflows
+    ref: main
+    refetch_frequency: 24h
+    configs:
+      - lefthook-shared.yml
+```
+
+Then run `lefthook install` once. The shared config registers a `pre-push` script that calls the same `check-version.sh` used by CI — same logic, same error messages, no drift. `refetch_frequency: 24h` keeps each consumer up to date with upstream changes without fetching on every push.
+
+The shared script is portable across macOS (bash 3.2 + BSD coreutils) and Linux (CI), so no extra setup is needed beyond having `lefthook` installed.
+
 ## Dependency audit
 
 Both workflows run `pnpm audit` (hard-fail). To ignore an unfixable CVE, add it to `pnpm.auditConfig.ignoreCves` in your `package.json`:
