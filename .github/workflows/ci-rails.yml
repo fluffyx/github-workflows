@@ -248,7 +248,7 @@ jobs:
     needs: [discover_e2e, filter]
     if: "!cancelled() && needs.discover_e2e.outputs.has_e2e == 'true' && (needs.filter.result != 'success' || needs.filter.outputs.skip_e2e != 'true')"
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         suite: ${{ fromJson(needs.discover_e2e.outputs.suites) }}
         shard: ${{ fromJson(needs.discover_e2e.outputs.shards) }}
@@ -342,7 +342,7 @@ jobs:
         run: |
           for dir in frontend*/; do
             [ -f "$dir/package.json" ] || continue
-            pnpm --dir "$dir" codegen 2>/dev/null || true
+            pnpm --dir "$dir" run --if-present codegen
           done
 
       - name: Start dev server
@@ -357,7 +357,7 @@ jobs:
 
       - name: Run E2E tests
         run: |
-          (cd "${{ matrix.suite }}" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ inputs.e2e_shards }} --bail 1)
+          (cd "${{ matrix.suite }}" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ inputs.e2e_shards }})
         env:
           CI: "true"
           DEV_E2E_RUNNING: "true"
