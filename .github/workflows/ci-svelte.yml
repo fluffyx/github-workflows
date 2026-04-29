@@ -8,6 +8,50 @@ permissions:
   packages: read
 
 jobs:
+  filter:
+    runs-on: ubuntu-latest
+    outputs:
+      ruby_tests_only: ${{ steps.classify.outputs.ruby_tests_only }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dorny/paths-filter@v3
+        id: paths
+        with:
+          base: ${{ github.base_ref || github.event.repository.default_branch || 'main' }}
+          filters: |
+            ruby_tests:
+              - 'spec/**'
+              - '.rubocop.yml'
+              - '.rubocop_todo.yml'
+            non_ruby_tests_code:
+              - '**'
+              - '!spec/**'
+              - '!.rubocop.yml'
+              - '!.rubocop_todo.yml'
+              - '!**/*.md'
+            any_code:
+              - '**'
+              - '!**/*.md'
+
+      - name: Classify changes
+        id: classify
+        run: |
+          RUBY_TESTS="${{ steps.paths.outputs.ruby_tests }}"
+          NON_RUBY_TESTS="${{ steps.paths.outputs.non_ruby_tests_code }}"
+          ANY_CODE="${{ steps.paths.outputs.any_code }}"
+          if [ "$RUBY_TESTS" = "true" ] && [ "$NON_RUBY_TESTS" = "false" ]; then
+            printf 'ruby_tests_only=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'ruby_tests_only=false\n' >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$ANY_CODE" = "false" ]; then
+            printf 'docs_only=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'docs_only=false\n' >> "$GITHUB_OUTPUT"
+          fi
+
   discover_frontends:
     name: discover
     runs-on: ubuntu-latest
@@ -27,8 +71,8 @@ jobs:
 
   audit_frontend:
     name: audit
-    needs: discover_frontends
-    if: needs.discover_frontends.outputs.has_frontends == 'true'
+    needs: [discover_frontends, filter]
+    if: "!cancelled() && needs.discover_frontends.outputs.has_frontends == 'true' && (needs.filter.result != 'success' || (needs.filter.outputs.ruby_tests_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -68,8 +112,8 @@ jobs:
 
   check_frontend:
     name: check
-    needs: discover_frontends
-    if: needs.discover_frontends.outputs.has_frontends == 'true'
+    needs: [discover_frontends, filter]
+    if: "!cancelled() && needs.discover_frontends.outputs.has_frontends == 'true' && (needs.filter.result != 'success' || (needs.filter.outputs.ruby_tests_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -109,8 +153,8 @@ jobs:
 
   test_frontend:
     name: test
-    needs: discover_frontends
-    if: needs.discover_frontends.outputs.has_frontends == 'true'
+    needs: [discover_frontends, filter]
+    if: "!cancelled() && needs.discover_frontends.outputs.has_frontends == 'true' && (needs.filter.result != 'success' || (needs.filter.outputs.ruby_tests_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
