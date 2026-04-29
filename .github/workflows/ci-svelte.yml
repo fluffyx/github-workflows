@@ -1,25 +1,34 @@
-name: CI (Frontend)
+name: CI (Svelte)
 
 on:
   workflow_call:
-    inputs:
-      e2e:
-        description: Run Playwright e2e tests
-        type: boolean
-        default: false
 
 permissions:
   contents: read
   packages: read
 
 jobs:
-  check-version:
+  discover_frontends:
+    name: discover
     runs-on: ubuntu-latest
+    outputs:
+      has_frontends: ${{ steps.find.outputs.has_frontends }}
     steps:
       - uses: actions/checkout@v6
-      - uses: fluffyx/github-workflows/actions/check-version@main
 
-  audit:
+      - name: Find frontend directories
+        id: find
+        run: |
+          if compgen -G 'frontend*/' > /dev/null 2>&1; then
+            echo "has_frontends=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_frontends=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  audit_frontend:
+    name: audit
+    needs: discover_frontends
+    if: needs.discover_frontends.outputs.has_frontends == 'true'
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -34,6 +43,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: frontend*/pnpm-lock.yaml
           registry-url: https://npm.pkg.github.com
 
       - name: Configure GitHub Packages auth
@@ -45,17 +55,21 @@ jobs:
       - if: env.GH_PACKAGES_TOKEN != ''
         run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install frontend dependencies
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            echo "==> Installing $dir"
+            pnpm --dir "$dir" install --frozen-lockfile
+          done
 
       - name: Audit
-        run: |
-          mapfile -t ignore_flags < <(node -e "
-            const cves = require('./package.json').pnpm?.auditConfig?.ignoreCves ?? [];
-            cves.forEach(c => console.log('--ignore=' + c));
-          ")
-          pnpm audit "${ignore_flags[@]}"
+        run: bin/audit-frontend
 
-  check:
+  check_frontend:
+    name: check
+    needs: discover_frontends
+    if: needs.discover_frontends.outputs.has_frontends == 'true'
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -70,6 +84,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: frontend*/pnpm-lock.yaml
           registry-url: https://npm.pkg.github.com
 
       - name: Configure GitHub Packages auth
@@ -81,12 +96,21 @@ jobs:
       - if: env.GH_PACKAGES_TOKEN != ''
         run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install frontend dependencies
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            echo "==> Installing $dir"
+            pnpm --dir "$dir" install --frozen-lockfile
+          done
 
       - name: Check
         run: bin/check
 
-  build-and-test:
+  test_frontend:
+    name: test
+    needs: discover_frontends
+    if: needs.discover_frontends.outputs.has_frontends == 'true'
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -101,6 +125,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: frontend*/pnpm-lock.yaml
           registry-url: https://npm.pkg.github.com
 
       - name: Configure GitHub Packages auth
@@ -112,74 +137,15 @@ jobs:
       - if: env.GH_PACKAGES_TOKEN != ''
         run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
-      - run: pnpm install --frozen-lockfile
-
-      - name: Sync
-        run: pnpm exec svelte-kit sync
-        continue-on-error: true
-
-      - name: Build
-        run: pnpm run build
-
-      - name: Pack dry-run
-        run: pnpm pack && tar tf *.tgz
+      - name: Install frontend dependencies
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            echo "==> Installing $dir"
+            pnpm --dir "$dir" install --frozen-lockfile
+          done
 
       - name: Test
-        run: pnpm test
+        run: bin/test-frontend
         env:
           COVERAGE: "true"
-
-  e2e:
-    if: inputs.e2e
-    runs-on: ubuntu-latest
-    env:
-      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v5
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: pnpm
-          registry-url: https://npm.pkg.github.com
-
-      - name: Configure GitHub Packages auth
-        if: env.GH_PACKAGES_TOKEN != ''
-        run: |
-          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
-          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
-
-      - if: env.GH_PACKAGES_TOKEN != ''
-        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Sync
-        run: pnpm exec svelte-kit sync
-        continue-on-error: true
-
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Build
-        run: pnpm exec vite build
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-
-      - name: Run Playwright tests
-        run: |
-          pnpm exec vite preview --port 5174 --strictPort &
-          npx wait-on http://localhost:5174 --timeout 30000
-          pnpm exec playwright test
-
-      - name: Upload test report
-        uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 14

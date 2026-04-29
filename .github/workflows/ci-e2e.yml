@@ -1,0 +1,182 @@
+name: CI (E2E)
+
+on:
+  workflow_call:
+    inputs:
+      e2e_shards:
+        type: number
+        default: 1
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  discover_e2e:
+    name: discover
+    runs-on: ubuntu-latest
+    outputs:
+      has_e2e: ${{ steps.find.outputs.has_e2e }}
+      suites: ${{ steps.find.outputs.suites }}
+      shards: ${{ steps.find.outputs.shards }}
+      shard_total: ${{ steps.find.outputs.shard_total }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check for E2E tests
+        id: find
+        run: |
+          suites=()
+          for dir in frontend*/; do
+            [ -d "${dir}tests/e2e" ] || continue
+            suites+=("${dir%/}")
+          done
+          shards_n="${{ inputs.e2e_shards }}"
+          shards_n="${shards_n%%.*}"
+          shards_n=$(( shards_n > 0 ? shards_n : 1 ))
+          if [ ${#suites[@]} -gt 0 ] && [ -x bin/dev-e2e ]; then
+            echo "has_e2e=true" >> "$GITHUB_OUTPUT"
+            echo "suites=$(jq -cn '$ARGS.positional' --args "${suites[@]}")" >> "$GITHUB_OUTPUT"
+            echo "shards=$(jq -cn '[range(1; $n+1)]' --argjson n "$shards_n")" >> "$GITHUB_OUTPUT"
+            echo "shard_total=$shards_n" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_e2e=false" >> "$GITHUB_OUTPUT"
+            echo "suites=[]" >> "$GITHUB_OUTPUT"
+            echo "shards=[1]" >> "$GITHUB_OUTPUT"
+            echo "shard_total=1" >> "$GITHUB_OUTPUT"
+          fi
+
+  e2e:
+    name: "${{ matrix.suite }} / #${{ matrix.shard }}"
+    needs: discover_e2e
+    if: needs.discover_e2e.outputs.has_e2e == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJson(needs.discover_e2e.outputs.suites) }}
+        shard: ${{ fromJson(needs.discover_e2e.outputs.shards) }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      DB_HOST: localhost
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      RAILS_ENV: test
+      DEV_PORT: "4100"
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+      VITE_STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_TEST_PUBLISHABLE_KEY }}
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+      BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure git auth for private deps
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend*/pnpm-lock.yaml
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure GitHub Packages auth
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: |
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
+
+      - name: Install frontend dependencies
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            echo "==> Installing $dir"
+            pnpm --dir "$dir" install --frozen-lockfile
+          done
+
+      - name: Install Caddy
+        run: |
+          sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
+          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+          sudo apt-get update
+          sudo apt-get install -y caddy
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend*/pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
+
+      - name: Install Playwright browsers
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            pnpm --dir "$dir" exec playwright install --with-deps chromium
+          done
+
+      - name: Prepare database
+        run: bin/rails db:test:prepare
+
+      - name: Generate GraphQL types
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            pnpm --dir "$dir" run --if-present codegen
+          done
+
+      - name: Start dev server
+        run: |
+          mkdir -p tmp/logs
+          setsid bin/dev-e2e </dev/null >tmp/logs/dev-e2e.log 2>&1 &
+          echo "DEV_E2E_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for dev server
+        run: |
+          timeout 120 bash -c "until curl -sf http://app.lvh.me:${DEV_PORT} > /dev/null 2>&1; do sleep 2; done"
+
+      - name: Run E2E tests
+        run: |
+          (cd "$SUITE" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ needs.discover_e2e.outputs.shard_total }} --max-failures 1)
+        env:
+          CI: "true"
+          DEV_E2E_RUNNING: "true"
+          SUITE: ${{ matrix.suite }}
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-${{ matrix.suite }}-shard${{ matrix.shard }}
+          path: |
+            frontend*/test-results/
+            tmp/logs/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Stop dev server
+        if: always()
+        run: kill -- "-$DEV_E2E_PID" 2>/dev/null || kill "$DEV_E2E_PID" 2>/dev/null || true
