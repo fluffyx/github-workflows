@@ -27,6 +27,7 @@ pre-commit:
     - name: node-modules-freshness
       glob: "**/{package.json,pnpm-lock.yaml}"
       run: |
+        shopt -s nullglob
         check_dir() {
           local dir="$1"
           if [ -f "$dir/pnpm-lock.yaml" ]; then
@@ -36,19 +37,28 @@ pre-commit:
             fi
           fi
         }
-        [ -f "package.json" ] && check_dir "."
+        failed=0
+        if [ -f "package.json" ]; then
+          check_dir "." || failed=1
+        fi
         for dir in frontend frontend-*; do
-          [ -d "$dir" ] && check_dir "$dir"
+          if [ -d "$dir" ]; then
+            check_dir "$dir" || failed=1
+          fi
         done
+        exit "$failed"
 
     - name: lockfile-frozen
       glob: "**/{package.json,pnpm-lock.yaml}"
       run: |
+        shopt -s nullglob
+        failed=0
         if [ -f "package.json" ] && [ -f "pnpm-lock.yaml" ]; then
-          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm install --frozen-lockfile --ignore-scripts || failed=1
         fi
         for dir in frontend frontend-*; do
           if [ -d "$dir" ] && [ -f "$dir/pnpm-lock.yaml" ]; then
-            (cd "$dir" && pnpm install --frozen-lockfile --ignore-scripts)
+            (cd "$dir" && pnpm install --frozen-lockfile --ignore-scripts) || failed=1
           fi
         done
+        exit "$failed"
