@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-semver_re='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+semver_re='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
 release_re='^[0-9]+\.[0-9]+\.[0-9]+$'
 date_re='^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
 
@@ -201,7 +201,7 @@ fi
 # --- Check CHANGELOG ordering ---
 if [ "$changelog_format" = "semver" ]; then
   release_headings=()
-  for h in "${headings[@]}"; do
+  for h in "${headings[@]+"${headings[@]}"}"; do
     if [[ "$h" =~ $release_re ]]; then
       release_headings+=("$h")
     fi
@@ -219,7 +219,7 @@ if [ "$changelog_format" = "semver" ]; then
   fi
 elif [ "$changelog_format" = "date" ]; then
   valid_dates=()
-  for h in "${headings[@]}"; do
+  for h in "${headings[@]+"${headings[@]}"}"; do
     if [[ "$h" =~ $date_re ]]; then
       valid_dates+=("$h")
     fi
