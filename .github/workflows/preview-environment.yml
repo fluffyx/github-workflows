@@ -46,6 +46,7 @@ concurrency:
 
 jobs:
   deploy-preview:
+    name: deploy
     if: |
       github.event.action != 'closed' &&
       github.event.action != 'unlabeled' &&
@@ -221,6 +222,7 @@ jobs:
             }
 
   teardown-preview:
+    name: teardown
     if: |
       (github.event.action == 'closed' && contains(github.event.pull_request.labels.*.name, inputs.label_name)) ||
       (github.event.action == 'unlabeled' && github.event.label.name == inputs.label_name)
