@@ -387,7 +387,8 @@ jobs:
 
       - name: Start dev server
         run: |
-          bin/dev-e2e &
+          mkdir -p tmp/logs
+          setsid bin/dev-e2e </dev/null >tmp/logs/dev-e2e.log 2>&1 &
           echo "DEV_E2E_PID=$!" >> "$GITHUB_ENV"
 
       - name: Wait for dev server
@@ -410,12 +411,8 @@ jobs:
           CI: "true"
           DEV_E2E_RUNNING: "true"
 
-      - name: Stop dev server
-        if: always()
-        run: kill "$DEV_E2E_PID" 2>/dev/null || true
-
       - name: Upload test artifacts
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-results
@@ -423,3 +420,8 @@ jobs:
             frontend*/test-results/
             tmp/logs/
           retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Stop dev server
+        if: always()
+        run: kill -- "-$DEV_E2E_PID" 2>/dev/null || kill "$DEV_E2E_PID" 2>/dev/null || true
