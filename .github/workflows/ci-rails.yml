@@ -49,7 +49,7 @@ jobs:
           suites=()
           for dir in frontend*/; do
             [ -d "${dir}tests/e2e" ] || continue
-            suites+=("$dir")
+            suites+=("${dir%/}")
           done
           if [ ${#suites[@]} -gt 0 ] && [ -x bin/dev-e2e ]; then
             echo "has_e2e=true" >> "$GITHUB_OUTPUT"
