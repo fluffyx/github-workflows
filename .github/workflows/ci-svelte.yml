@@ -103,7 +103,20 @@ jobs:
           done
 
       - name: Audit
-        run: bin/audit-frontend
+        id: audit
+        continue-on-error: true
+        shell: bash
+        run: bin/audit-frontend 2>&1 | tee "$RUNNER_TEMP/audit-frontend-output.txt"
+
+      - name: Classify audit result
+        if: steps.audit.outcome == 'failure'
+        run: |
+          if grep -qE 'ENOTFOUND|ETIMEDOUT|ECONNREFUSED|ECONNRESET|ERR_SOCKET_TIMEOUT|EAI_AGAIN|EHOSTUNREACH' "$RUNNER_TEMP/audit-frontend-output.txt"; then
+            printf '::warning::Frontend audit skipped — registry unreachable (network error)\n'
+          else
+            printf '::error::Frontend audit found vulnerabilities\n'
+            exit 1
+          fi
 
   check-frontend:
     name: check
