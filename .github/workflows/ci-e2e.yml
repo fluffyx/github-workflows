@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   discover:
-    name: ci-filter
+    name: discover
     runs-on: ubuntu-latest
     outputs:
       skip_e2e: ${{ steps.classify.outputs.skip_e2e }}
