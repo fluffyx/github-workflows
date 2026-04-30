@@ -89,7 +89,7 @@ jobs:
   e2e:
     name: "${{ matrix.suite }} / #${{ matrix.shard }}"
     needs: [discover]
-    if: "!cancelled() && (needs.discover.result != 'success' || (needs.discover.outputs.has_e2e == 'true' && needs.discover.outputs.skip_e2e != 'true'))"
+    if: "!cancelled() && needs.discover.result == 'success' && needs.discover.outputs.has_e2e == 'true' && needs.discover.outputs.skip_e2e != 'true'"
     strategy:
       fail-fast: false
       matrix:
