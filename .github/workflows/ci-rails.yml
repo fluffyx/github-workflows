@@ -15,7 +15,7 @@ jobs:
       - uses: fluffyx/github-workflows/actions/check-version@main
 
   discover:
-    name: ci-filter
+    name: discover
     runs-on: ubuntu-latest
     outputs:
       frontend_only: ${{ steps.classify.outputs.frontend_only }}
@@ -56,8 +56,8 @@ jobs:
             printf 'docs_only=false\n' >> "$GITHUB_OUTPUT"
           fi
 
-  scan-ruby:
-    name: scan
+  audit-ruby:
+    name: audit
     needs: [discover]
     if: "!cancelled() && (needs.discover.result != 'success' || (needs.discover.outputs.frontend_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest

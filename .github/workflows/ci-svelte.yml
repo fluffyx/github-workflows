@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   discover:
-    name: ci-filter
+    name: discover
     runs-on: ubuntu-latest
     outputs:
       ruby_tests_only: ${{ steps.classify.outputs.ruby_tests_only }}
