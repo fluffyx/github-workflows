@@ -14,8 +14,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: fluffyx/github-workflows/actions/check-version@main
 
-  filter:
-    name: ci-filter
+  discover:
+    name: discover
     runs-on: ubuntu-latest
     outputs:
       frontend_only: ${{ steps.classify.outputs.frontend_only }}
@@ -56,10 +56,10 @@ jobs:
             printf 'docs_only=false\n' >> "$GITHUB_OUTPUT"
           fi
 
-  scan_ruby:
-    name: scan
-    needs: [filter]
-    if: "!cancelled() && (needs.filter.result != 'success' || (needs.filter.outputs.frontend_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
+  audit-ruby:
+    name: audit
+    needs: [discover]
+    if: "!cancelled() && (needs.discover.result != 'success' || (needs.discover.outputs.frontend_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -82,8 +82,8 @@ jobs:
         run: bin/bundler-audit
 
   lint:
-    needs: [filter]
-    if: "!cancelled() && (needs.filter.result != 'success' || (needs.filter.outputs.frontend_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
+    needs: [discover]
+    if: "!cancelled() && (needs.discover.result != 'success' || (needs.discover.outputs.frontend_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -113,8 +113,8 @@ jobs:
         run: bin/rubocop -f github
 
   test:
-    needs: [filter]
-    if: "!cancelled() && (needs.filter.result != 'success' || (needs.filter.outputs.frontend_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
+    needs: [discover]
+    if: "!cancelled() && (needs.discover.result != 'success' || (needs.discover.outputs.frontend_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -156,8 +156,8 @@ jobs:
           COVERAGE: "true"
 
   pack:
-    needs: [filter]
-    if: "!cancelled() && (needs.filter.result != 'success' || (needs.filter.outputs.frontend_only != 'true' && needs.filter.outputs.docs_only != 'true'))"
+    needs: [discover]
+    if: "!cancelled() && (needs.discover.result != 'success' || (needs.discover.outputs.frontend_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
