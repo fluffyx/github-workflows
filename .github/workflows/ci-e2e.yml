@@ -12,11 +12,15 @@ permissions:
   packages: read
 
 jobs:
-  filter:
+  discover:
     name: ci-filter
     runs-on: ubuntu-latest
     outputs:
       skip_e2e: ${{ steps.classify.outputs.skip_e2e }}
+      has_e2e: ${{ steps.find.outputs.has_e2e }}
+      suites: ${{ steps.find.outputs.suites }}
+      shards: ${{ steps.find.outputs.shards }}
+      shard_total: ${{ steps.find.outputs.shard_total }}
     steps:
       - uses: actions/checkout@v6
 
@@ -59,17 +63,6 @@ jobs:
             printf 'skip_e2e=false\n' >> "$GITHUB_OUTPUT"
           fi
 
-  discover_e2e:
-    name: discover
-    runs-on: ubuntu-latest
-    outputs:
-      has_e2e: ${{ steps.find.outputs.has_e2e }}
-      suites: ${{ steps.find.outputs.suites }}
-      shards: ${{ steps.find.outputs.shards }}
-      shard_total: ${{ steps.find.outputs.shard_total }}
-    steps:
-      - uses: actions/checkout@v6
-
       - name: Check for E2E tests
         id: find
         run: |
@@ -95,13 +88,13 @@ jobs:
 
   e2e:
     name: "${{ matrix.suite }} / #${{ matrix.shard }}"
-    needs: [discover_e2e, filter]
-    if: "!cancelled() && needs.discover_e2e.outputs.has_e2e == 'true' && (needs.filter.result != 'success' || needs.filter.outputs.skip_e2e != 'true')"
+    needs: [discover]
+    if: "!cancelled() && needs.discover.result == 'success' && needs.discover.outputs.has_e2e == 'true' && needs.discover.outputs.skip_e2e != 'true'"
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJson(needs.discover_e2e.outputs.suites) }}
-        shard: ${{ fromJson(needs.discover_e2e.outputs.shards) }}
+        suite: ${{ fromJson(needs.discover.outputs.suites) }}
+        shard: ${{ fromJson(needs.discover.outputs.shards) }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -226,7 +219,7 @@ jobs:
 
       - name: Run E2E tests
         run: |
-          (cd "$SUITE" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ needs.discover_e2e.outputs.shard_total }} --max-failures 1)
+          (cd "$SUITE" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ needs.discover.outputs.shard_total }} --max-failures 1)
         env:
           CI: "true"
           DEV_E2E_RUNNING: "true"
