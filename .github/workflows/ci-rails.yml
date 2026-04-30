@@ -8,7 +8,7 @@ permissions:
   packages: read
 
 jobs:
-  check-version:
+  version-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -94,7 +94,7 @@ jobs:
             exit 1
           fi
 
-  lint:
+  check:
     needs: [discover]
     if: "!cancelled() && (needs.discover.result != 'success' || (needs.discover.outputs.frontend_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
