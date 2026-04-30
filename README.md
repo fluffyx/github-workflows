@@ -35,7 +35,7 @@ Rails apps use `frontend*/` directories at the repo root (e.g. `frontend/`, `fro
 
 Full CI for Rails apps that may include one or more SvelteKit frontends.
 
-**Jobs:** `check-version`, `scan_ruby`, `lint` (RuboCop), `test` (RSpec + Postgres), `pack` (gem build dry-run, skips if no gemspec), `audit_frontend`, `check_frontend`, `test_frontend`, `e2e` (Playwright). The frontend jobs are skipped automatically if no `frontend/` or `frontend-*` directories exist. The `e2e` job is skipped if no `frontend*/tests/e2e/` directories or `bin/e2e` script exist.
+**Jobs:** `check-version`, `audit-ruby` (Brakeman + Bundler Audit), `lint` (RuboCop), `test` (RSpec + Postgres), `pack` (gem build dry-run, skips if no gemspec), `audit-frontend`, `check-frontend`, `test-frontend`, `e2e` (Playwright). The frontend jobs are skipped automatically if no `frontend/` or `frontend-*` directories exist. The `e2e` job is skipped if no `frontend*/tests/e2e/` directories or `bin/e2e` script exist.
 
 ### E2E secrets
 
