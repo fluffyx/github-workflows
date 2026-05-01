@@ -87,7 +87,7 @@ jobs:
           fi
 
   e2e:
-    name: "${{ matrix.suite }} / test ${{ matrix.shard }} of ${{ needs.discover.outputs.shard_total }}"
+    name: "${{ matrix.suite }} / test ${{ matrix.shard }}"
     needs: [discover]
     if: "!cancelled() && needs.discover.result == 'success' && needs.discover.outputs.has_e2e == 'true' && needs.discover.outputs.skip_e2e != 'true'"
     strategy:

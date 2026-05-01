@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   e2e:
-    name: "test ${{ matrix.shard }} of 2"
+    name: "test ${{ matrix.shard }}"
     strategy:
       fail-fast: false
       matrix:
