@@ -90,35 +90,6 @@ jobs:
       - name: Check
         run: bin/check
 
-  build:
-    name: build
-    runs-on: ubuntu-latest
-    env:
-      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v5
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: pnpm
-          registry-url: https://npm.pkg.github.com
-
-      - name: Configure GitHub Packages auth
-        if: env.GH_PACKAGES_TOKEN != ''
-        run: |
-          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
-          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
-
-      - if: env.GH_PACKAGES_TOKEN != ''
-        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
-
-      - run: pnpm install --frozen-lockfile
-
       - name: Sync
         run: pnpm exec svelte-kit sync
         continue-on-error: true
