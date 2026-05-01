@@ -36,3 +36,9 @@ jobs:
           script: |
             const { run } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/review-pipeline/index.js`);
             await run({ github, context, core });
+
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fluffyx/github-workflows/actions/check-version@main
