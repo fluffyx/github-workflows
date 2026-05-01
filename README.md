@@ -6,10 +6,15 @@ Reusable GitHub Actions workflows for `fluffyx/*` repositories.
 
 | Workflow | File | For |
 |----------|------|-----|
-| **CI (Rails)** | `ci-rails.yml` | Rails + SvelteKit apps |
-| **CI (Frontend)** | `ci-frontend.yml` | Pure frontend / component library repos |
+| **CI (Rails)** | `ci-rails.yml` | Rails apps (with or without SvelteKit frontends) |
+| **CI (Svelte)** | `ci-svelte.yml` | SvelteKit frontend jobs for Rails apps |
+| **CI (E2E)** | `ci-e2e.yml` | Playwright E2E for Rails + multi-frontend apps |
+| **CI (Frontend)** | `ci-frontend.yml` | Standalone frontend / component library repos |
+| **CI (Frontend E2E)** | `ci-frontend-e2e.yml` | Playwright E2E for standalone frontend repos |
+| **CI (Gem)** | `ci-gem.yml` | Ruby gem CI |
 | **PR Title** | `pr-title.yml` | Enforce conventional commit PR titles |
 | **Review Pipeline** | `charlie-review.yml` | Charlie auto-review on PRs |
+| **Preview Environment** | `preview-environment.yml` | Deploy/teardown preview environments on PRs |
 
 ## Required bin scripts
 
@@ -17,15 +22,15 @@ These workflows delegate to bin scripts in your repo. Each repo decides what "ch
 
 | Script | Purpose | Called by | Example contents |
 |--------|---------|-----------|-----------------|
-| `bin/check` | Check-only (no file changes). Lint rules, typecheck, svelte-check. | `ci-frontend`, `ci-rails` | `prettier --check . && eslint . && svelte-check` |
-| `bin/test-frontend` | Frontend codegen + tests. | `ci-rails` | `pnpm codegen && pnpm test` |
-| `bin/audit-frontend` | Dependency audit across frontend dirs. | `ci-rails` | `pnpm audit` per frontend dir |
+| `bin/check` | Check-only (no file changes). Lint rules, typecheck, svelte-check. | `ci-frontend`, `ci-svelte` | `prettier --check . && eslint . && svelte-check` |
+| `bin/test-frontend` | Frontend codegen + tests. | `ci-svelte` | `pnpm codegen && pnpm test` |
+| `bin/audit-frontend` | Dependency audit across frontend dirs. | `ci-svelte` | `pnpm audit` per frontend dir |
 | `bin/lint` | Auto-fix (transforms files). For developers and lefthook. | (not called by CI) | `prettier --write . && eslint --fix .` |
 | `bin/typecheck` | Fast read-only typecheck (no lint). For lefthook pre-commit. | (not called by CI) | `pnpm check` (svelte-check) or `tsc --noEmit` |
 | `bin/rubocop` | RuboCop wrapper. | `ci-rails` | `bundle exec rubocop "$@"` |
 | `bin/brakeman` | Brakeman wrapper. | `ci-rails` | `bundle exec brakeman "$@"` |
 | `bin/bundler-audit` | Bundler Audit wrapper. | `ci-rails` | `bundle exec bundler-audit check --update` |
-| `bin/e2e` | Start dev stack and run Playwright E2E tests. | `ci-rails` | Starts Rails + frontend dev servers, runs Playwright serially per `frontend*/tests/e2e/` dir |
+| `bin/dev-e2e` | Start dev stack for E2E tests. | `ci-e2e` | Starts Rails + frontend dev servers via Caddy |
 
 ### Multi-frontend repos
 
@@ -33,13 +38,37 @@ Rails apps use `frontend*/` directories at the repo root (e.g. `frontend/`, `fro
 
 ## CI (Rails)
 
-Full CI for Rails apps that may include one or more SvelteKit frontends.
+CI for Rails apps that may include one or more SvelteKit frontends.
 
-**Jobs:** `check-version`, `audit-ruby` (Brakeman + Bundler Audit), `lint` (RuboCop), `test` (RSpec + Postgres), `pack` (gem build dry-run, skips if no gemspec), `audit-frontend`, `check-frontend`, `test-frontend`, `e2e` (Playwright). The frontend jobs are skipped automatically if no `frontend/` or `frontend-*` directories exist. The `e2e` job is skipped if no `frontend*/tests/e2e/` directories or `bin/e2e` script exist.
+**Jobs:** `version-check`, `discover` (path filtering), `audit` (Brakeman + Bundler Audit), `check` (RuboCop), `test` (RSpec + Postgres), `pack` (gem build dry-run, skips if no gemspec).
+
+The `discover` job classifies changes and skips irrelevant jobs (e.g. frontend-only or docs-only changes skip Rails CI).
+
+### Caller example (Rails + Svelte + E2E)
+
+```yaml
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  rails:
+    uses: fluffyx/github-workflows/.github/workflows/ci-rails.yml@main
+    secrets: inherit
+  svelte:
+    uses: fluffyx/github-workflows/.github/workflows/ci-svelte.yml@main
+    secrets: inherit
+  e2e:
+    uses: fluffyx/github-workflows/.github/workflows/ci-e2e.yml@main
+    secrets: inherit
+```
+
+This produces check names like `rails / audit`, `svelte / check`, `e2e / frontend / #1`.
 
 ### E2E secrets
 
-The `e2e` job expects these secrets in the consuming repo (via `secrets: inherit`):
+The `ci-e2e` workflow expects these secrets (via `secrets: inherit`):
 
 | Secret | Used as env var |
 |--------|----------------|
@@ -49,27 +78,15 @@ The `e2e` job expects these secrets in the consuming repo (via `secrets: inherit
 
 The job also installs Caddy (reverse proxy for multi-frontend dev servers) and caches Playwright browser binaries.
 
-### Caller example
-
-```yaml
-name: CI
-on:
-  pull_request:
-  push:
-    branches: [main]
-jobs:
-  ci:
-    uses: fluffyx/github-workflows/.github/workflows/ci-rails.yml@main
-    secrets: inherit
-```
-
 ## CI (Frontend)
 
 CI for standalone frontend or component library repos (e.g. fx-glass).
 
-**Jobs:** `check-version`, `audit` (pnpm audit), `check` (runs `bin/check`), `build` (sync + build + pack dry-run), `test` (unit tests), and optionally `e2e` (Playwright).
+**Jobs:** `version-check`, `audit` (pnpm audit), `check` (runs `bin/check`), `build` (sync + build + pack dry-run), `test` (unit tests).
 
-### Caller example
+E2E testing is handled by the separate `ci-frontend-e2e.yml` workflow.
+
+### Caller example (with E2E)
 
 ```yaml
 name: CI
@@ -79,18 +96,24 @@ on:
   pull_request:
     branches: [main]
 jobs:
-  ci:
+  svelte:
     uses: fluffyx/github-workflows/.github/workflows/ci-frontend.yml@main
     secrets: inherit
-    with:
-      e2e: true
+  e2e:
+    uses: fluffyx/github-workflows/.github/workflows/ci-frontend-e2e.yml@main
+    secrets: inherit
 ```
 
-### Inputs
+This produces check names like `svelte / audit`, `svelte / check`, `e2e / e2e`.
 
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `e2e` | `boolean` | `false` | Run Playwright e2e tests |
+### Caller example (without E2E)
+
+```yaml
+jobs:
+  svelte:
+    uses: fluffyx/github-workflows/.github/workflows/ci-frontend.yml@main
+    secrets: inherit
+```
 
 ## PR Title
 
@@ -115,7 +138,7 @@ Prepares PR state labels, clears previous review-pipeline labels on each new PR 
 ### Caller example
 
 ```yaml
-name: Charlie Review
+name: Request Charlie Review
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
@@ -131,7 +154,7 @@ jobs:
 
 ## Version sync check
 
-Both CI workflows automatically run a version sync check (`check-version` job). It:
+All CI workflows automatically run a version sync check (`version-check` job). It:
 
 - **Requires** `CHANGELOG.md` to exist
 - **Auto-discovers** version sources: `VERSION` file, root `package.json` (version field), `version.rb`
@@ -232,7 +255,7 @@ pre-commit:
 
 ## Dependency audit
 
-Both workflows run `pnpm audit` (hard-fail). To ignore an unfixable CVE, add it to `pnpm.auditConfig.ignoreCves` in your `package.json`:
+All workflows run dependency audits (hard-fail). To ignore an unfixable CVE in frontend repos, add it to `pnpm.auditConfig.ignoreCves` in your `package.json`:
 
 ```json
 {
@@ -245,6 +268,10 @@ Both workflows run `pnpm audit` (hard-fail). To ignore an unfixable CVE, add it 
 ```
 
 The `ci-frontend` workflow reads this array and passes `--ignore` flags to `pnpm audit` automatically (pnpm 10 does not read `auditConfig` natively).
+
+### Network error handling
+
+Audit jobs distinguish between real vulnerability findings (red failure) and advisory service outages (warning annotation). If the npm registry or Ruby advisory database is unreachable, the job emits a `::warning::` instead of failing the PR. Unrecognized network errors still fail red (safe default).
 
 ## Pack dry-run
 
