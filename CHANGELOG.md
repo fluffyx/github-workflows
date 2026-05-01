@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 - Split `ci-frontend.yml` e2e job into separate `ci-frontend-e2e.yml` workflow
+- Added sharded variants: `ci-frontend-test.yml` (Vitest) and `ci-frontend-e2e-sharded.yml` (Playwright)
+- Unsharded workflows no longer have a `discover` job — cleaner CI output
+- Added Playwright browser caching to `ci-frontend-e2e.yml` and sharded variant
+- Added `test_shards` input to `ci-svelte.yml` with `TEST_SHARD` env var for `bin/test-frontend`
+- Modernized `ci-gem.yml`: renamed `scan`→`audit`, `lint`→`check`, added `version-check`, added audit network error classification
 - Renamed `check-version` to `version-check` in `ci-frontend.yml`
 - Added audit network error classification to `ci-frontend.yml`
 - Updated README to reflect all current workflows and conventions
