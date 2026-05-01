@@ -12,7 +12,8 @@ permissions:
   packages: read
 
 jobs:
-  setup:
+  discover:
+    name: discover
     runs-on: ubuntu-latest
     outputs:
       shards: ${{ steps.compute.outputs.shards }}
@@ -28,11 +29,11 @@ jobs:
 
   e2e:
     name: "#${{ matrix.shard }}"
-    needs: [setup]
+    needs: [discover]
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJson(needs.setup.outputs.shards) }}
+        shard: ${{ fromJson(needs.discover.outputs.shards) }}
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -76,7 +77,7 @@ jobs:
         run: |
           pnpm exec vite preview --port 5174 --strictPort &
           bash -c 'for i in $(seq 1 60); do curl -sfo /dev/null http://localhost:5174 && exit 0 || sleep 0.5; done; exit 1'
-          pnpm exec playwright test --shard=${{ matrix.shard }}/${{ needs.setup.outputs.shard_total }}
+          pnpm exec playwright test --shard=${{ matrix.shard }}/${{ needs.discover.outputs.shard_total }}
 
       - name: Upload test report
         uses: actions/upload-artifact@v4
