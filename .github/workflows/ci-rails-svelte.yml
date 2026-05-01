@@ -178,7 +178,7 @@ jobs:
   test-frontend:
     name: "test ${{ matrix.shard }} of ${{ needs.discover.outputs.test_shard_total }}"
     needs: [discover]
-    if: "!cancelled() && needs.discover.outputs.has_frontends == 'true' && (needs.discover.result != 'success' || (needs.discover.outputs.ruby_tests_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
+    if: "!cancelled() && needs.discover.result == 'success' && needs.discover.outputs.has_frontends == 'true' && needs.discover.outputs.ruby_tests_only != 'true' && needs.discover.outputs.docs_only != 'true'"
     strategy:
       fail-fast: false
       matrix:
