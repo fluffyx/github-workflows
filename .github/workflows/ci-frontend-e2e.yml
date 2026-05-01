@@ -2,13 +2,37 @@ name: CI (Frontend E2E)
 
 on:
   workflow_call:
+    inputs:
+      e2e_shards:
+        type: number
+        default: 1
 
 permissions:
   contents: read
   packages: read
 
 jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.compute.outputs.shards }}
+      shard_total: ${{ steps.compute.outputs.shard_total }}
+    steps:
+      - id: compute
+        run: |
+          shards_n="${{ inputs.e2e_shards }}"
+          shards_n="${shards_n%%.*}"
+          shards_n=$(( shards_n > 0 ? shards_n : 1 ))
+          printf 'shards=%s\n' "$(jq -cn '[range(1; $n+1)]' --argjson n "$shards_n")" >> "$GITHUB_OUTPUT"
+          printf 'shard_total=%s\n' "$shards_n" >> "$GITHUB_OUTPUT"
+
   e2e:
+    name: "#${{ matrix.shard }}"
+    needs: [setup]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.setup.outputs.shards) }}
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -52,12 +76,12 @@ jobs:
         run: |
           pnpm exec vite preview --port 5174 --strictPort &
           bash -c 'for i in $(seq 1 60); do curl -sfo /dev/null http://localhost:5174 && exit 0 || sleep 0.5; done; exit 1'
-          pnpm exec playwright test
+          pnpm exec playwright test --shard=${{ matrix.shard }}/${{ needs.setup.outputs.shard_total }}
 
       - name: Upload test report
         uses: actions/upload-artifact@v4
         if: ${{ always() && !cancelled() }}
         with:
-          name: playwright-report
+          name: playwright-report-shard${{ matrix.shard }}
           path: playwright-report/
           retention-days: 14
