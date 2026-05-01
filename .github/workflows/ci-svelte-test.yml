@@ -1,4 +1,4 @@
-name: CI (Frontend Test — Sharded)
+name: CI (Svelte Test — Sharded)
 
 on:
   workflow_call:

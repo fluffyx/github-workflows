@@ -1,4 +1,4 @@
-name: CI (Frontend E2E — 2 Shards)
+name: CI (Svelte E2E — 2 Shards)
 
 on:
   workflow_call:

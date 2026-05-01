@@ -7,12 +7,13 @@ Reusable GitHub Actions workflows for `fluffyx/*` repositories.
 | Workflow | File | For |
 |----------|------|-----|
 | **CI (Rails)** | `ci-rails.yml` | Rails apps (with or without SvelteKit frontends) |
-| **CI (Svelte)** | `ci-svelte.yml` | SvelteKit frontend jobs for Rails apps |
+| **CI (Rails Svelte)** | `ci-rails-svelte.yml` | SvelteKit frontend jobs for Rails apps |
 | **CI (E2E)** | `ci-e2e.yml` | Playwright E2E for Rails + multi-frontend apps |
-| **CI (Frontend)** | `ci-frontend.yml` | Standalone frontend / component library repos |
-| **CI (Frontend Test — Sharded)** | `ci-frontend-test.yml` | Sharded Vitest for standalone frontend repos |
-| **CI (Frontend E2E)** | `ci-frontend-e2e.yml` | Playwright E2E for standalone frontend repos |
-| **CI (Frontend E2E — Sharded)** | `ci-frontend-e2e-sharded.yml` | Sharded Playwright E2E for standalone frontend repos |
+| **CI (Svelte)** | `ci-svelte.yml` | Standalone SvelteKit repos (libraries, packages) |
+| **CI (Svelte Test — Sharded)** | `ci-svelte-test.yml` | Sharded Vitest for standalone SvelteKit repos |
+| **CI (Svelte E2E)** | `ci-svelte-e2e.yml` | Playwright E2E for standalone SvelteKit repos |
+| **CI (Svelte E2E — 2 Shards)** | `ci-svelte-e2e-2-shards.yml` | 2-shard Playwright E2E (no discover overhead) |
+| **CI (Svelte E2E — Sharded)** | `ci-svelte-e2e-sharded.yml` | Configurable shard count Playwright E2E |
 | **CI (Gem)** | `ci-gem.yml` | Ruby gem CI |
 | **PR Title** | `pr-title.yml` | Enforce conventional commit PR titles |
 | **Review Pipeline** | `charlie-review.yml` | Charlie auto-review on PRs |
@@ -24,9 +25,9 @@ These workflows delegate to bin scripts in your repo. Each repo decides what "ch
 
 | Script | Purpose | Called by | Example contents |
 |--------|---------|-----------|-----------------|
-| `bin/check` | Check-only (no file changes). Lint rules, typecheck, svelte-check. | `ci-frontend`, `ci-svelte` | `prettier --check . && eslint . && svelte-check` |
-| `bin/test-frontend` | Frontend codegen + tests. | `ci-svelte` | `pnpm codegen && pnpm test` |
-| `bin/audit-frontend` | Dependency audit across frontend dirs. | `ci-svelte` | `pnpm audit` per frontend dir |
+| `bin/check` | Check-only (no file changes). Lint rules, typecheck, svelte-check. | `ci-svelte`, `ci-rails-svelte` | `prettier --check . && eslint . && svelte-check` |
+| `bin/test-frontend` | Frontend codegen + tests. | `ci-rails-svelte` | `pnpm codegen && pnpm test` |
+| `bin/audit-frontend` | Dependency audit across frontend dirs. | `ci-rails-svelte` | `pnpm audit` per frontend dir |
 | `bin/lint` | Auto-fix (transforms files). For developers and lefthook. | (not called by CI) | `prettier --write . && eslint --fix .` |
 | `bin/typecheck` | Fast read-only typecheck (no lint). For lefthook pre-commit. | (not called by CI) | `pnpm check` (svelte-check) or `tsc --noEmit` |
 | `bin/rubocop` | RuboCop wrapper. | `ci-rails` | `bundle exec rubocop "$@"` |
@@ -59,7 +60,7 @@ jobs:
     uses: fluffyx/github-workflows/.github/workflows/ci-rails.yml@main
     secrets: inherit
   svelte:
-    uses: fluffyx/github-workflows/.github/workflows/ci-svelte.yml@main
+    uses: fluffyx/github-workflows/.github/workflows/ci-rails-svelte.yml@main
     secrets: inherit
   e2e:
     uses: fluffyx/github-workflows/.github/workflows/ci-e2e.yml@main
@@ -99,10 +100,10 @@ on:
     branches: [main]
 jobs:
   svelte:
-    uses: fluffyx/github-workflows/.github/workflows/ci-frontend.yml@main
+    uses: fluffyx/github-workflows/.github/workflows/ci-svelte.yml@main
     secrets: inherit
   e2e:
-    uses: fluffyx/github-workflows/.github/workflows/ci-frontend-e2e-sharded.yml@main
+    uses: fluffyx/github-workflows/.github/workflows/ci-svelte-e2e-sharded.yml@main
     secrets: inherit
     with:
       e2e_shards: 2
@@ -115,10 +116,10 @@ This produces check names like `svelte / audit`, `svelte / check`, `e2e / discov
 ```yaml
 jobs:
   svelte:
-    uses: fluffyx/github-workflows/.github/workflows/ci-frontend.yml@main
+    uses: fluffyx/github-workflows/.github/workflows/ci-svelte.yml@main
     secrets: inherit
   e2e:
-    uses: fluffyx/github-workflows/.github/workflows/ci-frontend-e2e.yml@main
+    uses: fluffyx/github-workflows/.github/workflows/ci-svelte-e2e.yml@main
     secrets: inherit
 ```
 
@@ -129,27 +130,27 @@ This produces check names like `svelte / audit`, `svelte / check`, `e2e / e2e`.
 ```yaml
 jobs:
   svelte:
-    uses: fluffyx/github-workflows/.github/workflows/ci-frontend.yml@main
+    uses: fluffyx/github-workflows/.github/workflows/ci-svelte.yml@main
     secrets: inherit
 ```
 
 ### Sharded Vitest
 
-For repos where unit tests are slow, use `ci-frontend-test.yml` instead of the test job in `ci-frontend.yml`. Call both workflows — `ci-frontend.yml` handles audit/check/build, and the sharded workflow handles tests:
+For repos where unit tests are slow, use `ci-svelte-test.yml` instead of the test job in `ci-svelte.yml`. Call both workflows — `ci-svelte.yml` handles audit/check/build, and the sharded workflow handles tests:
 
 ```yaml
 jobs:
   svelte:
-    uses: fluffyx/github-workflows/.github/workflows/ci-frontend.yml@main
+    uses: fluffyx/github-workflows/.github/workflows/ci-svelte.yml@main
     secrets: inherit
   test:
-    uses: fluffyx/github-workflows/.github/workflows/ci-frontend-test.yml@main
+    uses: fluffyx/github-workflows/.github/workflows/ci-svelte-test.yml@main
     secrets: inherit
     with:
       test_shards: 3
 ```
 
-This produces `test / discover`, `test / #1`, `test / #2`, `test / #3`. Note: the `svelte / test` job from `ci-frontend.yml` still runs unsharded — remove it by not calling `ci-frontend.yml` if you only want sharded tests. (In practice, most repos don't need test sharding — setup time dominates for small suites.)
+This produces `test / discover`, `test / #1`, `test / #2`, `test / #3`. Note: the `svelte / test` job from `ci-svelte.yml` still runs unsharded — remove it by not calling `ci-svelte.yml` if you only want sharded tests. (In practice, most repos don't need test sharding — setup time dominates for small suites.)
 
 ## PR Title
 
@@ -303,7 +304,7 @@ All workflows run dependency audits (hard-fail). To ignore an unfixable CVE in f
 }
 ```
 
-The `ci-frontend` workflow reads this array and passes `--ignore` flags to `pnpm audit` automatically (pnpm 10 does not read `auditConfig` natively).
+The `ci-svelte` workflow reads this array and passes `--ignore` flags to `pnpm audit` automatically (pnpm 10 does not read `auditConfig` natively).
 
 ### Network error handling
 
@@ -311,7 +312,7 @@ Audit jobs distinguish between real vulnerability findings (red failure) and adv
 
 ## Pack dry-run
 
-- **ci-frontend.yml**: runs `pnpm pack && tar tf *.tgz` after build to verify the package is publishable
+- **ci-svelte.yml**: runs `pnpm pack && tar tf *.tgz` after build to verify the package is publishable
 - **ci-rails.yml**: runs `gem build *.gemspec` if a gemspec exists (skips for Rails apps)
 
 ## Test coverage
