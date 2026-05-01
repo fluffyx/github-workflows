@@ -24,6 +24,7 @@ jobs:
           shards_n="${{ inputs.e2e_shards }}"
           shards_n="${shards_n%%.*}"
           shards_n=$(( shards_n > 0 ? shards_n : 1 ))
+          shards_n=$(( shards_n > 256 ? 256 : shards_n ))
           printf 'shards=%s\n' "$(jq -cn '[range(1; $n+1)]' --argjson n "$shards_n")" >> "$GITHUB_OUTPUT"
           printf 'shard_total=%s\n' "$shards_n" >> "$GITHUB_OUTPUT"
 
