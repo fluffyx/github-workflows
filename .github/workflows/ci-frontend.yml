@@ -168,13 +168,6 @@ jobs:
         run: pnpm exec svelte-kit sync
         continue-on-error: true
 
-      - name: Cache Vitest transforms
-        uses: actions/cache@v5
-        with:
-          path: node_modules/.vitest
-          key: vitest-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'src/**') }}
-          restore-keys: vitest-${{ runner.os }}-
-
       - name: Test
         run: pnpm test
         env:
