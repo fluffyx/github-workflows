@@ -10,7 +10,9 @@ Reusable GitHub Actions workflows for `fluffyx/*` repositories.
 | **CI (Svelte)** | `ci-svelte.yml` | SvelteKit frontend jobs for Rails apps |
 | **CI (E2E)** | `ci-e2e.yml` | Playwright E2E for Rails + multi-frontend apps |
 | **CI (Frontend)** | `ci-frontend.yml` | Standalone frontend / component library repos |
+| **CI (Frontend Test — Sharded)** | `ci-frontend-test.yml` | Sharded Vitest for standalone frontend repos |
 | **CI (Frontend E2E)** | `ci-frontend-e2e.yml` | Playwright E2E for standalone frontend repos |
+| **CI (Frontend E2E — Sharded)** | `ci-frontend-e2e-sharded.yml` | Sharded Playwright E2E for standalone frontend repos |
 | **CI (Gem)** | `ci-gem.yml` | Ruby gem CI |
 | **PR Title** | `pr-title.yml` | Enforce conventional commit PR titles |
 | **Review Pipeline** | `charlie-review.yml` | Charlie auto-review on PRs |
@@ -84,9 +86,9 @@ CI for standalone frontend or component library repos (e.g. fx-glass).
 
 **Jobs:** `version-check`, `audit` (pnpm audit), `check` (runs `bin/check`), `build` (sync + build + pack dry-run), `test` (unit tests).
 
-E2E testing is handled by the separate `ci-frontend-e2e.yml` workflow.
+E2E and test sharding are handled by separate workflows. Use the sharded variants when your test suite is slow enough to benefit from parallelism.
 
-### Caller example (with E2E)
+### Caller example (with sharded E2E)
 
 ```yaml
 name: CI
@@ -95,6 +97,22 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+jobs:
+  svelte:
+    uses: fluffyx/github-workflows/.github/workflows/ci-frontend.yml@main
+    secrets: inherit
+  e2e:
+    uses: fluffyx/github-workflows/.github/workflows/ci-frontend-e2e-sharded.yml@main
+    secrets: inherit
+    with:
+      e2e_shards: 2
+```
+
+This produces check names like `svelte / audit`, `svelte / check`, `e2e / discover`, `e2e / #1`, `e2e / #2`.
+
+### Caller example (unsharded E2E)
+
+```yaml
 jobs:
   svelte:
     uses: fluffyx/github-workflows/.github/workflows/ci-frontend.yml@main
@@ -114,6 +132,24 @@ jobs:
     uses: fluffyx/github-workflows/.github/workflows/ci-frontend.yml@main
     secrets: inherit
 ```
+
+### Sharded Vitest
+
+For repos where unit tests are slow, use `ci-frontend-test.yml` instead of the test job in `ci-frontend.yml`. Call both workflows — `ci-frontend.yml` handles audit/check/build, and the sharded workflow handles tests:
+
+```yaml
+jobs:
+  svelte:
+    uses: fluffyx/github-workflows/.github/workflows/ci-frontend.yml@main
+    secrets: inherit
+  test:
+    uses: fluffyx/github-workflows/.github/workflows/ci-frontend-test.yml@main
+    secrets: inherit
+    with:
+      test_shards: 3
+```
+
+This produces `test / discover`, `test / #1`, `test / #2`, `test / #3`. Note: the `svelte / test` job from `ci-frontend.yml` still runs unsharded — remove it by not calling `ci-frontend.yml` if you only want sharded tests. (In practice, most repos don't need test sharding — setup time dominates for small suites.)
 
 ## PR Title
 
