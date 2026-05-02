@@ -2,14 +2,15 @@
 
 ## [Unreleased]
 
-- Split `ci-frontend.yml` e2e job into separate `ci-frontend-e2e.yml` workflow
-- Added sharded variants: `ci-frontend-test.yml` (Vitest) and `ci-frontend-e2e-sharded.yml` (Playwright)
+- Renamed `ci-svelte.yml` → `ci-rails-svelte.yml` (SvelteKit jobs for Rails apps)
+- Renamed `ci-frontend.yml` → `ci-svelte.yml` (standalone SvelteKit repos)
+- Renamed all `ci-frontend-*` workflows to `ci-svelte-*`
+- Split e2e into separate workflow, added sharded variants (`ci-svelte-test.yml`, `ci-svelte-e2e-sharded.yml`, `ci-svelte-e2e-2-shards.yml`)
 - Unsharded workflows no longer have a `discover` job — cleaner CI output
-- Added Playwright browser caching to `ci-frontend-e2e.yml` and sharded variant
-- Added `test_shards` input to `ci-svelte.yml` with `TEST_SHARD` env var for `bin/test-frontend`
+- Added Playwright browser caching to e2e workflows
+- Added `test_shards` input to `ci-rails-svelte.yml` with `TEST_SHARD` env var for `bin/test-frontend`
 - Modernized `ci-gem.yml`: renamed `scan`→`audit`, `lint`→`check`, added `version-check`, added audit network error classification
-- Renamed `check-version` to `version-check` in `ci-frontend.yml`
-- Added audit network error classification to `ci-frontend.yml`
+- Added audit network error classification to `ci-svelte.yml`
 - Updated README to reflect all current workflows and conventions
 
 ## [2026-05-01]

@@ -1,4 +1,4 @@
-name: CI (Frontend E2E)
+name: CI (Svelte E2E)
 
 on:
   workflow_call:

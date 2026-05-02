@@ -1,4 +1,4 @@
-name: CI (Frontend E2E — Sharded)
+name: CI (Svelte E2E — Sharded)
 
 on:
   workflow_call:
@@ -29,7 +29,7 @@ jobs:
           printf 'shard_total=%s\n' "$shards_n" >> "$GITHUB_OUTPUT"
 
   e2e:
-    name: "#${{ matrix.shard }}"
+    name: "test ${{ matrix.shard }}"
     needs: [discover]
     strategy:
       fail-fast: false
