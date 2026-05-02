@@ -2,6 +2,10 @@ name: CI (Svelte)
 
 on:
   workflow_call:
+    inputs:
+      test_shards:
+        type: number
+        default: 1
 
 permissions:
   contents: read
@@ -92,7 +96,6 @@ jobs:
 
       - name: Sync
         run: pnpm exec svelte-kit sync
-        continue-on-error: true
 
       - name: Build
         run: pnpm run build
@@ -101,7 +104,11 @@ jobs:
         run: pnpm pack && tar tf *.tgz
 
   test:
-    name: test
+    name: ${{ matrix.shard == 0 && 'test' || format('test {0}', matrix.shard) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ inputs.test_shards <= 1 && fromJson('[0]') || inputs.test_shards == 2 && fromJson('[1,2]') || inputs.test_shards == 3 && fromJson('[1,2,3]') || fromJson('[1,2,3,4]') }}
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -131,9 +138,8 @@ jobs:
 
       - name: Sync
         run: pnpm exec svelte-kit sync
-        continue-on-error: true
 
       - name: Test
-        run: pnpm test
+        run: pnpm test ${{ matrix.shard != 0 && format('-- --shard={0}/{1}', matrix.shard, inputs.test_shards > 4 && 4 || inputs.test_shards) || '' }}
         env:
           COVERAGE: "true"

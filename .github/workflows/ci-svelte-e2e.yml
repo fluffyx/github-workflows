@@ -2,6 +2,10 @@ name: CI (Svelte E2E)
 
 on:
   workflow_call:
+    inputs:
+      e2e_shards:
+        type: number
+        default: 1
 
 permissions:
   contents: read
@@ -9,6 +13,11 @@ permissions:
 
 jobs:
   e2e:
+    name: ${{ matrix.shard == 0 && 'test' || format('test {0}', matrix.shard) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ inputs.e2e_shards <= 1 && fromJson('[0]') || inputs.e2e_shards == 2 && fromJson('[1,2]') || inputs.e2e_shards == 3 && fromJson('[1,2,3]') || fromJson('[1,2,3,4]') }}
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -38,9 +47,9 @@ jobs:
 
       - name: Sync
         run: pnpm exec svelte-kit sync
-        continue-on-error: true
 
       - name: Cache Playwright browsers
+        id: playwright-cache
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
@@ -48,7 +57,17 @@ jobs:
           restore-keys: playwright-${{ runner.os }}-
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 2
+          retry_wait_seconds: 5
+          command: |
+            pnpm exec playwright install --with-deps chromium
+          on_retry_command: |
+            echo "::warning::Playwright install failed — switching apt mirror from Azure to archive.ubuntu.com"
+            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list
 
       - name: Build
         run: pnpm exec vite build
@@ -59,12 +78,16 @@ jobs:
         run: |
           pnpm exec vite preview --port 5174 --strictPort &
           bash -c 'for i in $(seq 1 60); do curl -sfo /dev/null http://localhost:5174 && exit 0 || sleep 0.5; done; exit 1'
-          pnpm exec playwright test
+          pnpm exec playwright test ${{ matrix.shard != 0 && format('--shard={0}/{1}', matrix.shard, inputs.e2e_shards > 4 && 4 || inputs.e2e_shards) || '' }} | tee "$RUNNER_TEMP/e2e-output.txt"
+          if ! grep -qE '[0-9]+ passed' "$RUNNER_TEMP/e2e-output.txt"; then
+            echo "::error::No tests were run in this shard"
+            exit 1
+          fi
 
       - name: Upload test report
         uses: actions/upload-artifact@v4
         if: ${{ always() && !cancelled() }}
         with:
-          name: playwright-report
+          name: ${{ matrix.shard == 0 && 'playwright-report' || format('playwright-report-shard{0}', matrix.shard) }}
           path: playwright-report/
           retention-days: 14
