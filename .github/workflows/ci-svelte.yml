@@ -2,6 +2,10 @@ name: CI (Svelte)
 
 on:
   workflow_call:
+    inputs:
+      test_shards:
+        type: number
+        default: 1
 
 permissions:
   contents: read
@@ -102,6 +106,7 @@ jobs:
 
   test:
     name: test
+    if: inputs.test_shards <= 1
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -135,5 +140,66 @@ jobs:
 
       - name: Test
         run: pnpm test
+        env:
+          COVERAGE: "true"
+
+  discover-test-shards:
+    name: discover
+    if: inputs.test_shards > 1
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.compute.outputs.shards }}
+      shard_total: ${{ steps.compute.outputs.shard_total }}
+    steps:
+      - id: compute
+        run: |
+          shards_n="${{ inputs.test_shards }}"
+          shards_n="${shards_n%%.*}"
+          shards_n=$(( shards_n > 0 ? shards_n : 1 ))
+          shards_n=$(( shards_n > 256 ? 256 : shards_n ))
+          printf 'shards=%s\n' "$(jq -cn '[range(1; $n+1)]' --argjson n "$shards_n")" >> "$GITHUB_OUTPUT"
+          printf 'shard_total=%s\n' "$shards_n" >> "$GITHUB_OUTPUT"
+
+  test-sharded:
+    name: "test ${{ matrix.shard }}"
+    if: inputs.test_shards > 1
+    needs: [discover-test-shards]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.discover-test-shards.outputs.shards) }}
+    runs-on: ubuntu-latest
+    env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure GitHub Packages auth
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: |
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
+
+      - if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Sync
+        run: pnpm exec svelte-kit sync
+        continue-on-error: true
+
+      - name: Test
+        run: pnpm test -- --shard=${{ matrix.shard }}/${{ needs.discover-test-shards.outputs.shard_total }}
         env:
           COVERAGE: "true"
