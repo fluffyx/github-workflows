@@ -184,6 +184,7 @@ jobs:
           restore-keys: playwright-${{ runner.os }}-
 
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 5
