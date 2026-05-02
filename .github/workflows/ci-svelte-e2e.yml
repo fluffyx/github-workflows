@@ -2,6 +2,10 @@ name: CI (Svelte E2E)
 
 on:
   workflow_call:
+    inputs:
+      e2e_shards:
+        type: number
+        default: 1
 
 permissions:
   contents: read
@@ -9,6 +13,8 @@ permissions:
 
 jobs:
   e2e:
+    name: test
+    if: inputs.e2e_shards <= 1
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -65,5 +71,89 @@ jobs:
         if: ${{ always() && !cancelled() }}
         with:
           name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+  discover-e2e-shards:
+    name: discover
+    if: inputs.e2e_shards > 1
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.compute.outputs.shards }}
+      shard_total: ${{ steps.compute.outputs.shard_total }}
+    steps:
+      - id: compute
+        run: |
+          shards_n="${{ inputs.e2e_shards }}"
+          shards_n="${shards_n%%.*}"
+          shards_n=$(( shards_n > 0 ? shards_n : 1 ))
+          shards_n=$(( shards_n > 256 ? 256 : shards_n ))
+          printf 'shards=%s\n' "$(jq -cn '[range(1; $n+1)]' --argjson n "$shards_n")" >> "$GITHUB_OUTPUT"
+          printf 'shard_total=%s\n' "$shards_n" >> "$GITHUB_OUTPUT"
+
+  e2e-sharded:
+    name: "test ${{ matrix.shard }}"
+    if: inputs.e2e_shards > 1
+    needs: [discover-e2e-shards]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.discover-e2e-shards.outputs.shards) }}
+    runs-on: ubuntu-latest
+    env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure GitHub Packages auth
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: |
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
+
+      - if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Sync
+        run: pnpm exec svelte-kit sync
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build
+        run: pnpm exec vite build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Run Playwright tests
+        run: |
+          pnpm exec vite preview --port 5174 --strictPort &
+          bash -c 'for i in $(seq 1 60); do curl -sfo /dev/null http://localhost:5174 && exit 0 || sleep 0.5; done; exit 1'
+          pnpm exec playwright test --shard=${{ matrix.shard }}/${{ needs.discover-e2e-shards.outputs.shard_total }}
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        if: ${{ always() && !cancelled() }}
+        with:
+          name: playwright-report-shard${{ matrix.shard }}
           path: playwright-report/
           retention-days: 14
