@@ -19,8 +19,6 @@ jobs:
       ruby_tests_only: ${{ steps.classify.outputs.ruby_tests_only }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
       has_frontends: ${{ steps.find.outputs.has_frontends }}
-      test_shards: ${{ steps.shards.outputs.shards }}
-      test_shard_total: ${{ steps.shards.outputs.shard_total }}
     steps:
       - uses: actions/checkout@v6
 
@@ -69,16 +67,6 @@ jobs:
           else
             echo "has_frontends=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Compute test shards
-        id: shards
-        run: |
-          shards_n="${{ inputs.test_shards }}"
-          shards_n="${shards_n%%.*}"
-          shards_n=$(( shards_n > 0 ? shards_n : 1 ))
-          shards_n=$(( shards_n > 256 ? 256 : shards_n ))
-          printf 'shards=%s\n' "$(jq -cn '[range(1; $n+1)]' --argjson n "$shards_n")" >> "$GITHUB_OUTPUT"
-          printf 'shard_total=%s\n' "$shards_n" >> "$GITHUB_OUTPUT"
 
   audit-frontend:
     name: audit
@@ -176,13 +164,13 @@ jobs:
         run: bin/check
 
   test-frontend:
-    name: "test ${{ matrix.shard }}"
+    name: ${{ matrix.shard == 0 && 'test' || format('test {0}', matrix.shard) }}
     needs: [discover]
     if: "!cancelled() && needs.discover.result == 'success' && needs.discover.outputs.has_frontends == 'true' && needs.discover.outputs.ruby_tests_only != 'true' && needs.discover.outputs.docs_only != 'true'"
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJson(needs.discover.outputs.test_shards) }}
+        shard: ${{ inputs.test_shards <= 1 && fromJson('[0]') || inputs.test_shards == 2 && fromJson('[1,2]') || inputs.test_shards == 3 && fromJson('[1,2,3]') || fromJson('[1,2,3,4]') }}
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -221,4 +209,4 @@ jobs:
         run: bin/test-frontend
         env:
           COVERAGE: "true"
-          TEST_SHARD: "${{ matrix.shard }}/${{ needs.discover.outputs.test_shard_total }}"
+          TEST_SHARD: ${{ matrix.shard != 0 && format('{0}/{1}', matrix.shard, inputs.test_shards > 4 && 4 || inputs.test_shards) || '' }}

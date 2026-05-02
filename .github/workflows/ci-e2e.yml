@@ -71,30 +71,23 @@ jobs:
             [ -d "${dir}tests/e2e" ] || continue
             suites+=("${dir%/}")
           done
-          shards_n="${{ inputs.e2e_shards }}"
-          shards_n="${shards_n%%.*}"
-          shards_n=$(( shards_n > 0 ? shards_n : 1 ))
           if [ ${#suites[@]} -gt 0 ] && [ -x bin/dev-e2e ]; then
             echo "has_e2e=true" >> "$GITHUB_OUTPUT"
             echo "suites=$(jq -cn '$ARGS.positional' --args "${suites[@]}")" >> "$GITHUB_OUTPUT"
-            echo "shards=$(jq -cn '[range(1; $n+1)]' --argjson n "$shards_n")" >> "$GITHUB_OUTPUT"
-            echo "shard_total=$shards_n" >> "$GITHUB_OUTPUT"
           else
             echo "has_e2e=false" >> "$GITHUB_OUTPUT"
             echo "suites=[]" >> "$GITHUB_OUTPUT"
-            echo "shards=[1]" >> "$GITHUB_OUTPUT"
-            echo "shard_total=1" >> "$GITHUB_OUTPUT"
           fi
 
   e2e:
-    name: "${{ matrix.suite }} / test ${{ matrix.shard }}"
+    name: "${{ matrix.suite }} / ${{ matrix.shard == 0 && 'test' || format('test {0}', matrix.shard) }}"
     needs: [discover]
     if: "!cancelled() && needs.discover.result == 'success' && needs.discover.outputs.has_e2e == 'true' && needs.discover.outputs.skip_e2e != 'true'"
     strategy:
       fail-fast: false
       matrix:
         suite: ${{ fromJson(needs.discover.outputs.suites) }}
-        shard: ${{ fromJson(needs.discover.outputs.shards) }}
+        shard: ${{ inputs.e2e_shards <= 1 && fromJson('[0]') || inputs.e2e_shards == 2 && fromJson('[1,2]') || inputs.e2e_shards == 3 && fromJson('[1,2,3]') || fromJson('[1,2,3,4]') }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -227,7 +220,7 @@ jobs:
 
       - name: Run E2E tests
         run: |
-          (cd "$SUITE" && npx playwright test --config tests/e2e/playwright.config.ts --shard=${{ matrix.shard }}/${{ needs.discover.outputs.shard_total }} --max-failures 1)
+          (cd "$SUITE" && npx playwright test --config tests/e2e/playwright.config.ts ${{ matrix.shard != 0 && format('--shard={0}/{1}', matrix.shard, inputs.e2e_shards > 4 && 4 || inputs.e2e_shards) || '' }} --max-failures 1)
         env:
           CI: "true"
           DEV_E2E_RUNNING: "true"
