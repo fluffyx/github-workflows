@@ -191,11 +191,19 @@ jobs:
           restore-keys: playwright-${{ runner.os }}-
 
       - name: Install Playwright browsers
-        run: |
-          for dir in frontend*/; do
-            [ -f "$dir/package.json" ] || continue
-            pnpm --dir "$dir" exec playwright install --with-deps chromium
-          done
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 2
+          retry_wait_seconds: 5
+          command: |
+            for dir in frontend*/; do
+              [ -f "$dir/package.json" ] || continue
+              pnpm --dir "$dir" exec playwright install --with-deps chromium
+            done
+          on_retry_command: |
+            echo "::warning::Playwright install failed — switching apt mirror from Azure to archive.ubuntu.com"
+            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list
 
       - name: Prepare database
         run: bin/rails db:test:prepare
