@@ -162,33 +162,3 @@ jobs:
         env:
           COVERAGE: "true"
 
-  pack:
-    needs: [discover]
-    if: "!cancelled() && (needs.discover.result != 'success' || (needs.discover.outputs.frontend_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
-    runs-on: ubuntu-latest
-    env:
-      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
-      BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Configure git auth for private deps
-        if: env.GH_PACKAGES_TOKEN != ''
-        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
-
-      - uses: ruby/setup-ruby@v1
-        with:
-          bundler-cache: true
-
-      - name: Gem build dry-run
-        run: |
-          found=false
-          for gemspec in *.gemspec; do
-            [ -f "$gemspec" ] || continue
-            found=true
-            echo "==> Building $gemspec"
-            gem build "$gemspec"
-          done
-          if [ "$found" = false ]; then
-            echo "No gemspec found — skipping"
-          fi
