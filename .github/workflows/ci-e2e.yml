@@ -152,6 +152,15 @@ jobs:
             pnpm --dir "$dir" install --frozen-lockfile
           done
 
+      - name: Cache Vite pre-bundled deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            frontend/node_modules/.vite
+            frontend-book/node_modules/.vite
+          key: vite-deps-${{ runner.os }}-${{ hashFiles('frontend*/pnpm-lock.yaml', 'frontend*/vite.config.ts') }}
+          restore-keys: vite-deps-${{ runner.os }}-
+
       - name: Resolve Caddy arch
         id: caddy-arch
         run: |
