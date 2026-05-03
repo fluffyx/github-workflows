@@ -112,6 +112,7 @@ jobs:
       VITE_STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_TEST_PUBLISHABLE_KEY }}
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
       BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
+      SUITE: ${{ matrix.suite }}
     steps:
       - uses: actions/checkout@v6
 
@@ -130,8 +131,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: frontend*/pnpm-lock.yaml
           registry-url: https://npm.pkg.github.com
 
       - name: Configure GitHub Packages auth
@@ -140,11 +139,21 @@ jobs:
           printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
           echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
 
+      - name: Locate pnpm store
+        id: pnpm-store
+        run: printf 'path=%s\n' "$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('frontend*/pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+
       - name: Install frontend dependencies
         run: |
           for dir in frontend*/; do
             [ -f "$dir/package.json" ] || continue
-            echo "==> Installing $dir"
             pnpm --dir "$dir" install --frozen-lockfile
           done
 
@@ -180,8 +189,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('frontend*/pnpm-lock.yaml') }}
-          restore-keys: playwright-${{ runner.os }}-
+          key: playwright-${{ runner.os }}-${{ matrix.suite }}-${{ hashFiles(format('{0}/pnpm-lock.yaml', matrix.suite)) }}
+          restore-keys: playwright-${{ runner.os }}-${{ matrix.suite }}-
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -190,11 +199,7 @@ jobs:
           timeout_minutes: 5
           max_attempts: 2
           retry_wait_seconds: 5
-          command: |
-            for dir in frontend*/; do
-              [ -f "$dir/package.json" ] || continue
-              pnpm --dir "$dir" exec playwright install --with-deps chromium
-            done
+          command: pnpm --dir "$SUITE" exec playwright install --with-deps chromium
           on_retry_command: |
             echo "::warning::Playwright install failed — switching apt mirror from Azure to archive.ubuntu.com"
             sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list
@@ -217,10 +222,15 @@ jobs:
 
       - name: Wait for dev server
         run: |
-          timeout 120 bash -c "until curl -sf http://app.lvh.me:${DEV_PORT} > /dev/null 2>&1; do sleep 2; done"
+          if [ -x bin/wait-for-e2e ]; then
+            bin/wait-for-e2e "$SUITE"
+          else
+            timeout 120 bash -c 'until curl -sf http://localhost:${DEV_PORT:-4100} > /dev/null 2>&1; do sleep 2; done'
+          fi
 
       - name: Run E2E tests
         run: |
+          set -o pipefail
           (cd "$SUITE" && npx playwright test --config tests/e2e/playwright.config.ts ${{ matrix.shard != 0 && format('--shard={0}/{1}', matrix.shard, inputs.e2e_shards > 4 && 4 || inputs.e2e_shards) || '' }} --max-failures 1) | tee "$RUNNER_TEMP/e2e-output.txt"
           if ! grep -qE '[0-9]+ passed' "$RUNNER_TEMP/e2e-output.txt"; then
             echo "::error::No tests were run in this shard"
@@ -229,7 +239,6 @@ jobs:
         env:
           CI: "true"
           DEV_E2E_RUNNING: "true"
-          SUITE: ${{ matrix.suite }}
 
       - name: Upload test artifacts
         if: always()

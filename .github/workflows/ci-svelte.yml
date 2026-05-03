@@ -46,6 +46,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
+          set -o pipefail
           mapfile -t ignore_flags < <(node -e "
             const cves = require('./package.json').pnpm?.auditConfig?.ignoreCves ?? [];
             cves.forEach(c => console.log('--ignore=' + c));

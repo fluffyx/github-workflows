@@ -34,6 +34,7 @@ These workflows delegate to bin scripts in your repo. Each repo decides what "ch
 | `bin/brakeman` | Brakeman wrapper. | `ci-rails` | `bundle exec brakeman "$@"` |
 | `bin/bundler-audit` | Bundler Audit wrapper. | `ci-rails` | `bundle exec bundler-audit check --update` |
 | `bin/dev-e2e` | Start dev stack for E2E tests. | `ci-e2e` | Starts Rails + frontend dev servers via Caddy |
+| `bin/wait-for-e2e` | *(optional)* Wait for dev server readiness. Receives suite name as `$1`. Falls back to polling `localhost:$DEV_PORT` if absent. | `ci-e2e` | `timeout 120 bash -c "until curl -sf http://app.lvh.me:4100; do sleep 2; done"` |
 
 ### Multi-frontend repos
 

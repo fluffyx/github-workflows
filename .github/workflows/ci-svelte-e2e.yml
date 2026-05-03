@@ -73,6 +73,7 @@ jobs:
 
       - name: Run Playwright tests
         run: |
+          set -o pipefail
           pnpm exec vite preview --port 5174 --strictPort &
           bash -c 'for i in $(seq 1 60); do curl -sfo /dev/null http://localhost:5174 && exit 0 || sleep 0.5; done; exit 1'
           pnpm exec playwright test ${{ matrix.shard != 0 && format('--shard={0}/{1}', matrix.shard, inputs.e2e_shards > 4 && 4 || inputs.e2e_shards) || '' }} | tee "$RUNNER_TEMP/e2e-output.txt"
