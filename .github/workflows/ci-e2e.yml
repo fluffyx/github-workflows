@@ -147,11 +147,15 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-store-${{ runner.os }}-${{ matrix.suite }}-${{ hashFiles(format('{0}/pnpm-lock.yaml', matrix.suite)) }}
-          restore-keys: pnpm-store-${{ runner.os }}-${{ matrix.suite }}-
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('frontend*/pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
 
       - name: Install frontend dependencies
-        run: pnpm --dir "$SUITE" install --frozen-lockfile
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            pnpm --dir "$dir" install --frozen-lockfile
+          done
 
       - name: Resolve Caddy arch
         id: caddy-arch
@@ -204,7 +208,11 @@ jobs:
         run: bin/rails db:test:prepare
 
       - name: Generate GraphQL types
-        run: pnpm --dir "$SUITE" run --if-present codegen
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            pnpm --dir "$dir" run --if-present codegen
+          done
 
       - name: Start dev server
         run: |
@@ -214,7 +222,11 @@ jobs:
 
       - name: Wait for dev server
         run: |
-          timeout 120 bash -c "until curl -sf http://app.lvh.me:${DEV_PORT} > /dev/null 2>&1; do sleep 2; done"
+          case "$SUITE" in
+            frontend-book) HOST=book.lvh.me ;;
+            *)             HOST=app.lvh.me ;;
+          esac
+          timeout 120 bash -c "until curl -sf http://${HOST}:${DEV_PORT} > /dev/null 2>&1; do sleep 2; done"
 
       - name: Run E2E tests
         run: |
