@@ -6,6 +6,9 @@ on:
       e2e_shards:
         type: number
         default: 1
+      e2e_suite_shards:
+        type: string
+        default: '{}'
 
 permissions:
   contents: read
@@ -18,9 +21,7 @@ jobs:
     outputs:
       skip_e2e: ${{ steps.classify.outputs.skip_e2e }}
       has_e2e: ${{ steps.find.outputs.has_e2e }}
-      suites: ${{ steps.find.outputs.suites }}
-      shards: ${{ steps.find.outputs.shards }}
-      shard_total: ${{ steps.find.outputs.shard_total }}
+      matrix: ${{ steps.find.outputs.matrix }}
     steps:
       - uses: actions/checkout@v6
 
@@ -72,11 +73,24 @@ jobs:
             suites+=("${dir%/}")
           done
           if [ ${#suites[@]} -gt 0 ] && [ -x bin/dev-e2e ]; then
-            echo "has_e2e=true" >> "$GITHUB_OUTPUT"
-            echo "suites=$(jq -cn '$ARGS.positional' --args "${suites[@]}")" >> "$GITHUB_OUTPUT"
+            printf 'has_e2e=true\n' >> "$GITHUB_OUTPUT"
+            suite_shards='${{ inputs.e2e_suite_shards }}'
+            default_shards=${{ inputs.e2e_shards }}
+            matrix='[]'
+            for suite in "${suites[@]}"; do
+              count=$(printf '%s' "$suite_shards" | jq --arg s "$suite" --argjson d "$default_shards" '.[$s] // $d')
+              if [ "$count" -le 1 ]; then
+                matrix=$(printf '%s' "$matrix" | jq --arg suite "$suite" '. + [{"suite": $suite, "shard": 0, "shard_total": 1}]')
+              else
+                for i in $(seq 1 "$count"); do
+                  matrix=$(printf '%s' "$matrix" | jq --arg suite "$suite" --argjson shard "$i" --argjson total "$count" '. + [{"suite": $suite, "shard": $shard, "shard_total": $total}]')
+                done
+              fi
+            done
+            printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
           else
-            echo "has_e2e=false" >> "$GITHUB_OUTPUT"
-            echo "suites=[]" >> "$GITHUB_OUTPUT"
+            printf 'has_e2e=false\n' >> "$GITHUB_OUTPUT"
+            printf 'matrix=[]\n' >> "$GITHUB_OUTPUT"
           fi
 
   e2e:
@@ -86,8 +100,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJson(needs.discover.outputs.suites) }}
-        shard: ${{ inputs.e2e_shards <= 1 && fromJson('[0]') || inputs.e2e_shards == 2 && fromJson('[1,2]') || inputs.e2e_shards == 3 && fromJson('[1,2,3]') || fromJson('[1,2,3,4]') }}
+        include: ${{ fromJson(needs.discover.outputs.matrix) }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -155,9 +168,7 @@ jobs:
       - name: Cache Vite pre-bundled deps
         uses: actions/cache@v5
         with:
-          path: |
-            frontend/node_modules/.vite
-            frontend-book/node_modules/.vite
+          path: frontend*/node_modules/.vite
           key: vite-deps-${{ runner.os }}-${{ hashFiles('frontend*/pnpm-lock.yaml', 'frontend*/vite.config.ts') }}
           restore-keys: vite-deps-${{ runner.os }}-
 
@@ -240,7 +251,7 @@ jobs:
       - name: Run E2E tests
         run: |
           set -o pipefail
-          (cd "$SUITE" && npx playwright test --config tests/e2e/playwright.config.ts ${{ matrix.shard != 0 && format('--shard={0}/{1}', matrix.shard, inputs.e2e_shards > 4 && 4 || inputs.e2e_shards) || '' }} --max-failures 1) | tee "$RUNNER_TEMP/e2e-output.txt"
+          (cd "$SUITE" && npx playwright test --config tests/e2e/playwright.config.ts ${{ matrix.shard != 0 && format('--shard={0}/{1}', matrix.shard, matrix.shard_total) || '' }} --max-failures 1) | tee "$RUNNER_TEMP/e2e-output.txt"
           if ! grep -qE '[0-9]+ passed' "$RUNNER_TEMP/e2e-output.txt"; then
             echo "::error::No tests were run in this shard"
             exit 1
