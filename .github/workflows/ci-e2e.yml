@@ -131,8 +131,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: ${{ matrix.suite }}/pnpm-lock.yaml
           registry-url: https://npm.pkg.github.com
 
       - name: Configure GitHub Packages auth
@@ -140,6 +138,17 @@ jobs:
         run: |
           printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
           echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
+
+      - name: Locate pnpm store
+        id: pnpm-store
+        run: printf 'path=%s\n' "$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('frontend*/pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
 
       - name: Install frontend dependencies
         run: pnpm --dir "$SUITE" install --frozen-lockfile
