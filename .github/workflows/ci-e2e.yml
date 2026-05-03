@@ -221,6 +221,7 @@ jobs:
 
       - name: Run E2E tests
         run: |
+          set -o pipefail
           (cd "$SUITE" && npx playwright test --config tests/e2e/playwright.config.ts ${{ matrix.shard != 0 && format('--shard={0}/{1}', matrix.shard, inputs.e2e_shards > 4 && 4 || inputs.e2e_shards) || '' }} --max-failures 1) | tee "$RUNNER_TEMP/e2e-output.txt"
           if ! grep -qE '[0-9]+ passed' "$RUNNER_TEMP/e2e-output.txt"; then
             echo "::error::No tests were run in this shard"
