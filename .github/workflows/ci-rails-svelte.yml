@@ -110,7 +110,9 @@ jobs:
         id: audit
         continue-on-error: true
         shell: bash
-        run: bin/audit-frontend 2>&1 | tee "$RUNNER_TEMP/audit-frontend-output.txt"
+        run: |
+          set -o pipefail
+          bin/audit-frontend 2>&1 | tee "$RUNNER_TEMP/audit-frontend-output.txt"
 
       - name: Classify audit result
         if: steps.audit.outcome == 'failure'
