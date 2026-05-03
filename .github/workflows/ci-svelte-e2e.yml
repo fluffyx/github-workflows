@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   packages: read
+  checks: write
 
 jobs:
   e2e:
@@ -81,6 +82,16 @@ jobs:
             echo "::error::No tests were run in this shard"
             exit 1
           fi
+
+      - name: E2E test report
+        if: always() && !cancelled()
+        uses: dorny/test-reporter@v1
+        with:
+          name: 'e2e / results ${{ matrix.shard != 0 && matrix.shard || 1 }}'
+          path: 'test-results/junit.xml'
+          reporter: java-junit
+          fail-on-error: false
+        continue-on-error: true
 
       - name: Upload test report
         uses: actions/upload-artifact@v4
