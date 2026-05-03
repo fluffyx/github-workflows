@@ -13,6 +13,7 @@ on:
 permissions:
   contents: read
   packages: read
+  checks: write
 
 jobs:
   discover:
@@ -266,6 +267,16 @@ jobs:
         env:
           CI: "true"
           DEV_E2E_RUNNING: "true"
+
+      - name: E2E test report
+        if: always() && !cancelled()
+        uses: dorny/test-reporter@v1
+        with:
+          name: 'E2E ${{ matrix.suite }} shard ${{ matrix.shard != 0 && matrix.shard || 1 }}'
+          path: '${{ matrix.suite }}/test-results/junit.xml'
+          reporter: java-junit
+          fail-on-error: false
+        continue-on-error: true
 
       - name: Upload test artifacts
         if: always()
