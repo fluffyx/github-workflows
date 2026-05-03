@@ -112,6 +112,7 @@ jobs:
       VITE_STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_TEST_PUBLISHABLE_KEY }}
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
       BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
+      SUITE: ${{ matrix.suite }}
     steps:
       - uses: actions/checkout@v6
 
@@ -141,12 +142,7 @@ jobs:
           echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
 
       - name: Install frontend dependencies
-        run: |
-          for dir in frontend*/; do
-            [ -f "$dir/package.json" ] || continue
-            echo "==> Installing $dir"
-            pnpm --dir "$dir" install --frozen-lockfile
-          done
+        run: pnpm --dir "$SUITE" install --frozen-lockfile
 
       - name: Resolve Caddy arch
         id: caddy-arch
@@ -190,11 +186,7 @@ jobs:
           timeout_minutes: 5
           max_attempts: 2
           retry_wait_seconds: 5
-          command: |
-            for dir in frontend*/; do
-              [ -f "$dir/package.json" ] || continue
-              pnpm --dir "$dir" exec playwright install --with-deps chromium
-            done
+          command: pnpm --dir "$SUITE" exec playwright install --with-deps chromium
           on_retry_command: |
             echo "::warning::Playwright install failed — switching apt mirror from Azure to archive.ubuntu.com"
             sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list
@@ -203,11 +195,7 @@ jobs:
         run: bin/rails db:test:prepare
 
       - name: Generate GraphQL types
-        run: |
-          for dir in frontend*/; do
-            [ -f "$dir/package.json" ] || continue
-            pnpm --dir "$dir" run --if-present codegen
-          done
+        run: pnpm --dir "$SUITE" run --if-present codegen
 
       - name: Start dev server
         run: |
@@ -230,7 +218,6 @@ jobs:
         env:
           CI: "true"
           DEV_E2E_RUNNING: "true"
-          SUITE: ${{ matrix.suite }}
 
       - name: Upload test artifacts
         if: always()
