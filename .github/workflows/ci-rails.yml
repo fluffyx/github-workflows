@@ -152,7 +152,9 @@ jobs:
           bundler-cache: true
 
       - name: Wait for Postgres
-        run: until pg_isready -h localhost -p 5432 -U postgres -q; do sleep 1; done
+        run: |
+          timeout 60 bash -c 'until pg_isready -h localhost -p 5432 -U postgres -q; do sleep 1; done' \
+            || { echo "::error::Postgres did not become ready within 60s"; exit 1; }
 
       - name: Prepare database
         run: bin/rails db:test:prepare
