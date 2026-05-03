@@ -250,10 +250,14 @@ jobs:
 
       - name: Wait for dev server
         run: |
-          if [ -x bin/wait-for-e2e ]; then
+          if [ -x bin/ci/wait-for-e2e ]; then
+            bin/ci/wait-for-e2e "$SUITE"
+          elif [ -x bin/wait-for-e2e ]; then
             bin/wait-for-e2e "$SUITE"
           else
-            timeout 120 bash -c 'until curl -sf http://localhost:${DEV_PORT:-4100} > /dev/null 2>&1; do sleep 2; done'
+            echo "::error::No readiness probe found. Create bin/ci/wait-for-e2e — see https://github.com/fluffyx/billiedoby-scheduling/blob/staging/bin/ci/wait-for-e2e for a reference implementation."
+            echo "::error::The previous localhost-only fallback caused silent partial-readiness failures and has been removed."
+            exit 1
           fi
 
       - name: Run E2E tests
