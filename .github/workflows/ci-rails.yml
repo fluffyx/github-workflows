@@ -131,11 +131,6 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
         ports:
           - 5432:5432
     env:
@@ -155,6 +150,11 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
+
+      - name: Wait for Postgres
+        run: |
+          timeout 60 bash -c 'until pg_isready -h localhost -p 5432 -U postgres -q; do sleep 1; done' \
+            || { echo "::error::Postgres did not become ready within 60s"; exit 1; }
 
       - name: Prepare database
         run: bin/rails db:test:prepare
