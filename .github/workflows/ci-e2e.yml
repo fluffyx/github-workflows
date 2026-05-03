@@ -147,8 +147,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-store-${{ runner.os }}-${{ hashFiles('frontend*/pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-${{ runner.os }}-
+          key: pnpm-store-${{ runner.os }}-${{ matrix.suite }}-${{ hashFiles(format('{0}/pnpm-lock.yaml', matrix.suite)) }}
+          restore-keys: pnpm-store-${{ runner.os }}-${{ matrix.suite }}-
 
       - name: Install frontend dependencies
         run: pnpm --dir "$SUITE" install --frozen-lockfile
