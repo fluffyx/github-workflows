@@ -276,7 +276,7 @@ jobs:
         if: always() && !cancelled()
         uses: dorny/test-reporter@v1
         with:
-          name: 'E2E ${{ matrix.suite }} shard ${{ matrix.shard != 0 && matrix.shard || 1 }}'
+          name: 'e2e / ${{ matrix.suite }} / results ${{ matrix.shard != 0 && matrix.shard || 1 }}'
           path: '${{ matrix.suite }}/test-results/junit.xml'
           reporter: java-junit
           fail-on-error: false
