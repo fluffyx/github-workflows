@@ -80,10 +80,10 @@ jobs:
             for suite in "${suites[@]}"; do
               count=$(printf '%s' "$suite_shards" | jq --arg s "$suite" --argjson d "$default_shards" '.[$s] // $d')
               if [ "$count" -le 1 ]; then
-                matrix=$(printf '%s' "$matrix" | jq --arg suite "$suite" '. + [{"suite": $suite, "shard": 0, "shard_total": 1}]')
+                matrix=$(printf '%s' "$matrix" | jq -c --arg suite "$suite" '. + [{"suite": $suite, "shard": 0, "shard_total": 1}]')
               else
                 for i in $(seq 1 "$count"); do
-                  matrix=$(printf '%s' "$matrix" | jq --arg suite "$suite" --argjson shard "$i" --argjson total "$count" '. + [{"suite": $suite, "shard": $shard, "shard_total": $total}]')
+                  matrix=$(printf '%s' "$matrix" | jq -c --arg suite "$suite" --argjson shard "$i" --argjson total "$count" '. + [{"suite": $suite, "shard": $shard, "shard_total": $total}]')
                 done
               fi
             done
