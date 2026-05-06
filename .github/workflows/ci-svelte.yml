@@ -96,7 +96,14 @@ jobs:
         run: bin/check
 
       - name: Build
-        run: pnpm run build
+        shell: bash
+        run: |
+          BUILD_OUT=$(pnpm run build 2>&1)
+          echo "$BUILD_OUT"
+          if echo "$BUILD_OUT" | grep -q "were likely not generated"; then
+            echo "::error::svelte-package failed to emit .d.ts files for some modules"
+            exit 1
+          fi
 
       - name: Pack dry-run
         run: pnpm pack && tar tf *.tgz
