@@ -201,8 +201,10 @@ jobs:
               ref: context.payload.pull_request.head.ref,
               per_page: 100,
             });
-            for (const deployment of deployments) {
-              if (deployment.environment.startsWith(vercelPrefix) && deployment.environment.endsWith(vercelSuffix)) continue;
+            const nonVercel = deployments
+              .filter(d => !(d.environment.startsWith(vercelPrefix) && d.environment.endsWith(vercelSuffix)))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            for (const deployment of nonVercel.slice(1)) {
               const statuses = await github.rest.repos.listDeploymentStatuses({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
