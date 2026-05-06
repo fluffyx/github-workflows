@@ -242,7 +242,7 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 ref: sha,
-                environment: `${app.name.toLowerCase()} (PR #${prNum} preview)`,
+                environment: `${app.name} (PR #${prNum} preview)`,
                 auto_merge: false,
                 required_contexts: [],
                 transient_environment: true,
