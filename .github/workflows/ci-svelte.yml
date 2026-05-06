@@ -98,11 +98,17 @@ jobs:
       - name: Build
         shell: bash
         run: |
+          set +e
           BUILD_OUT=$(pnpm run build 2>&1)
+          BUILD_STATUS=$?
+          set -e
           echo "$BUILD_OUT"
           if echo "$BUILD_OUT" | grep -q "were likely not generated"; then
             echo "::error::svelte-package failed to emit .d.ts files for some modules"
             exit 1
+          fi
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            exit "$BUILD_STATUS"
           fi
 
       - name: Pack dry-run
