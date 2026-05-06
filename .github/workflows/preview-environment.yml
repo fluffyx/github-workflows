@@ -172,6 +172,7 @@ jobs:
             export VERCEL_PROJECT_ID="$PROJECT_ID"
             URL=$(npx vercel deploy --token "$VERCEL_TOKEN" --yes --no-clipboard \
               --env "API_BACKEND_URL=https://${RENDER_HOST}" \
+              --env "GH_PACKAGES_TOKEN=${GH_PACKAGES_TOKEN}" \
               --meta githubCommitRef="${PR_BRANCH}" \
               --meta githubCommitSha="${PR_SHA}" \
               --meta githubCommitMessage="PR #${PR_NUMBER}: ${PR_TITLE}" \
