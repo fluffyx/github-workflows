@@ -242,7 +242,7 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 ref: sha,
-                environment: `Preview – ${app.name} (PR #${prNum})`,
+                environment: `${app.name.toLowerCase()} (PR #${prNum} preview)`,
                 auto_merge: false,
                 required_contexts: [],
                 transient_environment: true,
@@ -274,15 +274,14 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const prefix = `Preview – `;
-            const suffix = ` (PR #${context.issue.number})`;
+            const suffix = ` (PR #${context.issue.number} preview)`;
             const deployments = await github.paginate(github.rest.repos.listDeployments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               per_page: 100,
             });
             for (const deployment of deployments) {
-              if (!deployment.environment.startsWith(prefix) || !deployment.environment.endsWith(suffix)) continue;
+              if (!deployment.environment.endsWith(suffix)) continue;
               await github.rest.repos.createDeploymentStatus({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
