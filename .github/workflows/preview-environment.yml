@@ -170,8 +170,8 @@ jobs:
               exit 1
             fi
             export VERCEL_PROJECT_ID="$PROJECT_ID"
+            npx vercel pull --yes --environment=preview --token "$VERCEL_TOKEN" 2>/dev/null
             URL=$(npx vercel deploy --token "$VERCEL_TOKEN" --yes --no-clipboard \
-              --build-env "GH_PACKAGES_TOKEN=${GH_PACKAGES_TOKEN}" \
               --env "API_BACKEND_URL=https://${RENDER_HOST}" \
               --meta githubCommitRef="${PR_BRANCH}" \
               --meta githubCommitSha="${PR_SHA}" \
