@@ -170,8 +170,11 @@ jobs:
               exit 1
             fi
             export VERCEL_PROJECT_ID="$PROJECT_ID"
+            npx vercel pull --yes --environment=preview --token "$VERCEL_TOKEN" >/dev/null || {
+              echo "::error::vercel pull failed for project ${NAME} (${PROJECT_ID})"
+              exit 1
+            }
             URL=$(npx vercel deploy --token "$VERCEL_TOKEN" --yes --no-clipboard \
-              --build-env "GH_PACKAGES_TOKEN=${GH_PACKAGES_TOKEN}" \
               --env "API_BACKEND_URL=https://${RENDER_HOST}" \
               --meta githubCommitRef="${PR_BRANCH}" \
               --meta githubCommitSha="${PR_SHA}" \
