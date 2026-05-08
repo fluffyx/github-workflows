@@ -5,7 +5,7 @@ async function handlePullRequest({ helpers, context }) {
   const labels = await helpers.listLabels(pr.number);
 
   await helpers.removePresentLabels(pr.number, labels, ALL_LABELS);
-  await helpers.requestCharlieReview(pr.number);
+  await helpers.removeCharlieReview(pr.number);
 }
 
 module.exports = { handlePullRequest };
