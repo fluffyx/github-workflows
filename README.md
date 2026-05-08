@@ -25,10 +25,11 @@ These workflows delegate to bin scripts in your repo. Each repo decides what "ch
 
 | Script | Purpose | Called by | Example contents |
 |--------|---------|-----------|-----------------|
-| `bin/check` | Check-only (no file changes). Lint rules, typecheck, svelte-check. | `ci-svelte`, `ci-rails-svelte` | `prettier --check . && eslint . && svelte-check` |
+| `bin/check` | Check-only (no file changes). Composes `bin/lint` + `bin/typecheck`. | `ci-svelte`, `ci-rails-svelte` | `bin/lint && bin/typecheck` |
 | `bin/test-frontend` | Frontend codegen + tests. | `ci-rails-svelte` | `pnpm codegen && pnpm test` |
 | `bin/audit-frontend` | Dependency audit across frontend dirs. | `ci-rails-svelte` | `pnpm audit` per frontend dir |
-| `bin/lint` | Auto-fix (transforms files). For developers and lefthook. | (not called by CI) | `prettier --write . && eslint --fix .` |
+| `bin/format` | Auto-fix (transforms files). For developers and lefthook pre-commit. | (not called by CI) | `prettier --write . && eslint --fix .` |
+| `bin/lint` | Check-only lint (no file changes). For CI via `bin/check`. | `bin/check` | `prettier --check . && eslint .` |
 | `bin/typecheck` | Fast read-only typecheck (no lint). For lefthook pre-commit. | (not called by CI) | `pnpm check` (svelte-check) or `tsc --noEmit` |
 | `bin/rubocop` | RuboCop wrapper. | `ci-rails` | `bundle exec rubocop "$@"` |
 | `bin/brakeman` | Brakeman wrapper. | `ci-rails` | `bundle exec brakeman "$@"` |
@@ -227,7 +228,7 @@ Three preset configs at the root of this repo, each pulled in via lefthook's `re
 | Preset | Hook | Jobs |
 |--------|------|------|
 | `lefthook-shared.yml` | `pre-push` | `check-version` (same logic as CI) |
-| `lefthook-frontend.yml` | `pre-commit` | `frontend-lint` (`bin/lint`), `frontend-typecheck` (`bin/typecheck`), `node-modules-freshness`, `lockfile-frozen` |
+| `lefthook-frontend.yml` | `pre-commit` | `frontend-lint` (`bin/format`), `frontend-typecheck` (`bin/typecheck`), `node-modules-freshness`, `lockfile-frozen` |
 | `lefthook-rails.yml` | `pre-commit` | `rubocop` (autofix on staged Ruby files) |
 
 ### Consumer wiring
@@ -261,7 +262,7 @@ Then run `lefthook install` once. Local jobs in the consumer's own `lefthook.yml
 
 The frontend preset assumes the conventions documented under **Required bin scripts** above:
 
-- `bin/lint` — auto-fix (called with `{staged_files}` as args)
+- `bin/format` — auto-fix (called with `{staged_files}` as args)
 - `bin/typecheck` — read-only typecheck. If your project doesn't have one yet, a 2-line shim is enough:
   ```bash
   #!/usr/bin/env bash
@@ -330,4 +331,4 @@ No artifacts are uploaded — coverage enforcement is local to each repo via thr
 - **Node 22, pnpm 10** — hardcoded in the shared workflows. Bump here to update all consumers.
 - **Ruby version** — read from `.ruby-version` in each consumer repo.
 - **GitHub Packages** — auth is configured automatically when a `GH_PACKAGES_TOKEN` secret exists in the caller repo, skipped otherwise.
-- **`bin/lint` vs `bin/check`** — `bin/lint` auto-fixes files (for developers/lefthook). `bin/check` is read-only (for CI). CI never calls `bin/lint`.
+- **`bin/format` vs `bin/lint` vs `bin/check`** — `bin/format` auto-fixes files (prettier --write + eslint --fix, for developers/lefthook). `bin/lint` is check-only (prettier --check + eslint, for CI). `bin/check` composes `bin/lint` + `bin/typecheck` (both read-only) and is what CI calls directly.

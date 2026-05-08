@@ -1,15 +1,15 @@
 # Shared frontend pre-commit checks for fluffyx repos.
 #
 # Assumes the consumer follows the bin/ convention from this repo's
-# README: bin/lint (auto-fix) and bin/typecheck (read-only types).
+# README: bin/format (auto-fix) and bin/typecheck (read-only types).
 # Single-package repos add a 2-line bin/typecheck shim if needed:
 #
 #   #!/usr/bin/env bash
 #   exec pnpm check "$@"
 #
-# Globs are deliberately permissive — bin/lint and bin/typecheck are
+# Globs are deliberately permissive — bin/format and bin/typecheck are
 # expected to know which files in their tree to act on (e.g., billiedoby's
-# bin/lint filters staged files to frontend*/ subdirs internally). Override
+# bin/format filters staged files to frontend*/ subdirs internally). Override
 # any single job in the consumer's local lefthook.yml by re-declaring it
 # under the same name; lefthook merges remote + local by name.
 
@@ -17,7 +17,7 @@ pre-commit:
   jobs:
     - name: frontend-lint
       glob: "**/*.{ts,js,json,css,scss,svelte,graphql,gql}"
-      run: bin/lint {staged_files}
+      run: bin/format {staged_files}
       stage_fixed: true
 
     - name: frontend-typecheck
