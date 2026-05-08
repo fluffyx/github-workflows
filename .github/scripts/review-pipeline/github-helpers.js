@@ -158,18 +158,7 @@ function createHelpers({ github, context, core }) {
   }
 
   async function requestCharlieReview(prNumber) {
-    try {
-      await github.rest.pulls.removeRequestedReviewers({
-        owner,
-        repo,
-        pull_number: prNumber,
-        reviewers: [CHARLIE_REVIEWER],
-      });
-    } catch (error) {
-      if (error.status !== 422) {
-        throw error;
-      }
-    }
+    await removeCharlieReview(prNumber);
 
     await github.rest.pulls.requestReviewers({
       owner,
