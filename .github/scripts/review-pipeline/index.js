@@ -1,5 +1,6 @@
 const { createHelpers } = require('./github-helpers.js');
 const { handlePullRequest } = require('./events/pull-request.js');
+const { handleWorkflowRun } = require('./events/workflow-run.js');
 // Greptile/Macroscope pipeline disabled — only Charlie auto-request is active.
 // Uncomment these handlers to re-enable the full review pipeline.
 // const { handlePullRequestReview } = require('./events/pull-request-review.js');
@@ -8,6 +9,7 @@ const { handlePullRequest } = require('./events/pull-request.js');
 
 const HANDLERS = {
   pull_request: handlePullRequest,
+  workflow_run: handleWorkflowRun,
   // pull_request_review: handlePullRequestReview,
   // check_run: handleCheckRun,
   // issue_comment: handleIssueComment,
