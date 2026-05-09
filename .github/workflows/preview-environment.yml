@@ -115,7 +115,7 @@ jobs:
                 --data-urlencode "name=${PREVIEW_NAME}" \
                 --data-urlencode "type=web_service" \
                 --data-urlencode "includePreviews=true" \
-                --data-urlencode "limit=20" \
+                --data-urlencode "limit=100" \
                 -H "Authorization: Bearer ${RENDER_API_KEY}") || {
                 echo "Render API request failed ($i/$max_retries)"
                 if [ "$i" -lt "$max_retries" ]; then sleep "$retry_delay"; fi
