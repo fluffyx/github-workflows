@@ -2,72 +2,18 @@ name: CI (Svelte)
 
 on:
   workflow_call:
+    inputs:
+      test_shards:
+        type: number
+        default: 1
 
 permissions:
   contents: read
   packages: read
 
 jobs:
-  discover:
-    name: discover
-    runs-on: ubuntu-latest
-    outputs:
-      ruby_tests_only: ${{ steps.classify.outputs.ruby_tests_only }}
-      docs_only: ${{ steps.classify.outputs.docs_only }}
-      has_frontends: ${{ steps.find.outputs.has_frontends }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: dorny/paths-filter@v3
-        id: paths
-        with:
-          token: ''
-          base: ${{ github.base_ref || github.event.repository.default_branch || 'main' }}
-          filters: |
-            ruby_tests:
-              - 'spec/**'
-              - '.rubocop.yml'
-              - '.rubocop_todo.yml'
-            non_ruby_tests_code:
-              - '**'
-              - '!spec/**'
-              - '!.rubocop.yml'
-              - '!.rubocop_todo.yml'
-              - '!**/*.md'
-            any_code:
-              - '**'
-              - '!**/*.md'
-
-      - name: Classify changes
-        id: classify
-        run: |
-          RUBY_TESTS="${{ steps.paths.outputs.ruby_tests }}"
-          NON_RUBY_TESTS="${{ steps.paths.outputs.non_ruby_tests_code }}"
-          ANY_CODE="${{ steps.paths.outputs.any_code }}"
-          if [ "$RUBY_TESTS" = "true" ] && [ "$NON_RUBY_TESTS" = "false" ]; then
-            printf 'ruby_tests_only=true\n' >> "$GITHUB_OUTPUT"
-          else
-            printf 'ruby_tests_only=false\n' >> "$GITHUB_OUTPUT"
-          fi
-          if [ "$ANY_CODE" = "false" ]; then
-            printf 'docs_only=true\n' >> "$GITHUB_OUTPUT"
-          else
-            printf 'docs_only=false\n' >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Find frontend directories
-        id: find
-        run: |
-          if compgen -G 'frontend*/' > /dev/null 2>&1; then
-            echo "has_frontends=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_frontends=false" >> "$GITHUB_OUTPUT"
-          fi
-
-  audit-frontend:
+  audit:
     name: audit
-    needs: [discover]
-    if: "!cancelled() && needs.discover.outputs.has_frontends == 'true' && (needs.discover.result != 'success' || (needs.discover.outputs.ruby_tests_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -82,7 +28,6 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: frontend*/pnpm-lock.yaml
           registry-url: https://npm.pkg.github.com
 
       - name: Configure GitHub Packages auth
@@ -94,21 +39,32 @@ jobs:
       - if: env.GH_PACKAGES_TOKEN != ''
         run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
-      - name: Install frontend dependencies
-        run: |
-          for dir in frontend*/; do
-            [ -f "$dir/package.json" ] || continue
-            echo "==> Installing $dir"
-            pnpm --dir "$dir" install --frozen-lockfile
-          done
+      - run: pnpm install --frozen-lockfile
 
       - name: Audit
-        run: bin/audit-frontend
+        id: audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          mapfile -t ignore_flags < <(node -e "
+            const cves = require('./package.json').pnpm?.auditConfig?.ignoreCves ?? [];
+            cves.forEach(c => console.log('--ignore=' + c));
+          ")
+          pnpm audit "${ignore_flags[@]}" 2>&1 | tee "$RUNNER_TEMP/audit-frontend-output.txt"
 
-  check-frontend:
+      - name: Classify audit result
+        if: steps.audit.outcome == 'failure'
+        run: |
+          if grep -qE 'ENOTFOUND|ETIMEDOUT|ECONNREFUSED|ECONNRESET|ERR_SOCKET_TIMEOUT|EAI_AGAIN|EHOSTUNREACH' "$RUNNER_TEMP/audit-frontend-output.txt"; then
+            printf '::warning::Frontend audit skipped — registry unreachable (network error)\n'
+          else
+            printf '::error::Frontend audit found vulnerabilities\n'
+            exit 1
+          fi
+
+  check:
     name: check
-    needs: [discover]
-    if: "!cancelled() && needs.discover.outputs.has_frontends == 'true' && (needs.discover.result != 'success' || (needs.discover.outputs.ruby_tests_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -123,7 +79,6 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: frontend*/pnpm-lock.yaml
           registry-url: https://npm.pkg.github.com
 
       - name: Configure GitHub Packages auth
@@ -135,21 +90,36 @@ jobs:
       - if: env.GH_PACKAGES_TOKEN != ''
         run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
-      - name: Install frontend dependencies
-        run: |
-          for dir in frontend*/; do
-            [ -f "$dir/package.json" ] || continue
-            echo "==> Installing $dir"
-            pnpm --dir "$dir" install --frozen-lockfile
-          done
+      - run: pnpm install --frozen-lockfile
 
       - name: Check
         run: bin/check
 
-  test-frontend:
-    name: test
-    needs: [discover]
-    if: "!cancelled() && needs.discover.outputs.has_frontends == 'true' && (needs.discover.result != 'success' || (needs.discover.outputs.ruby_tests_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
+      - name: Build
+        shell: bash
+        run: |
+          set +e
+          BUILD_OUT=$(pnpm run build 2>&1)
+          BUILD_STATUS=$?
+          set -e
+          echo "$BUILD_OUT"
+          if echo "$BUILD_OUT" | grep -q "were likely not generated"; then
+            echo "::error::svelte-package failed to emit .d.ts files for some modules"
+            exit 1
+          fi
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            exit "$BUILD_STATUS"
+          fi
+
+      - name: Pack dry-run
+        run: pnpm pack && tar tf *.tgz
+
+  test:
+    name: ${{ matrix.shard == 0 && 'test' || format('test {0}', matrix.shard) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ inputs.test_shards <= 1 && fromJson('[0]') || inputs.test_shards == 2 && fromJson('[1,2]') || inputs.test_shards == 3 && fromJson('[1,2,3]') || fromJson('[1,2,3,4]') }}
     runs-on: ubuntu-latest
     env:
       GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -164,7 +134,6 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: frontend*/pnpm-lock.yaml
           registry-url: https://npm.pkg.github.com
 
       - name: Configure GitHub Packages auth
@@ -176,15 +145,9 @@ jobs:
       - if: env.GH_PACKAGES_TOKEN != ''
         run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
-      - name: Install frontend dependencies
-        run: |
-          for dir in frontend*/; do
-            [ -f "$dir/package.json" ] || continue
-            echo "==> Installing $dir"
-            pnpm --dir "$dir" install --frozen-lockfile
-          done
+      - run: pnpm install --frozen-lockfile
 
       - name: Test
-        run: bin/test-frontend
+        run: pnpm test ${{ matrix.shard != 0 && format('-- --shard={0}/{1}', matrix.shard, inputs.test_shards > 4 && 4 || inputs.test_shards) || '' }}
         env:
           COVERAGE: "true"

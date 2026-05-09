@@ -8,7 +8,7 @@ permissions:
   packages: read
 
 jobs:
-  scan:
+  audit:
     runs-on: ubuntu-latest
     env:
       BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -20,9 +20,24 @@ jobs:
           bundler-cache: true
 
       - name: Bundler Audit
-        run: bundle exec bundler-audit
+        id: bundler-audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          bundle exec bundler-audit 2>&1 | tee "$RUNNER_TEMP/bundler-audit-output.txt"
 
-  lint:
+      - name: Classify audit result
+        if: steps.bundler-audit.outcome == 'failure'
+        run: |
+          if grep -qE 'Errno::(ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH)|SocketError|Net::(Open|Read)Timeout' "$RUNNER_TEMP/bundler-audit-output.txt"; then
+            printf '::warning::Bundler Audit skipped — advisory database unreachable (network error)\n'
+          else
+            printf '::error::Bundler Audit found vulnerabilities\n'
+            exit 1
+          fi
+
+  check:
     runs-on: ubuntu-latest
     env:
       RUBOCOP_CACHE_ROOT: tmp/rubocop

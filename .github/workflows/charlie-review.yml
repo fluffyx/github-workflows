@@ -2,8 +2,6 @@ name: Request Charlie Review
 
 on:
   workflow_call:
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
 
 permissions:
   contents: read
@@ -11,11 +9,12 @@ permissions:
   pull-requests: write
 
 jobs:
-  review-pipeline:
+  pipeline:
     runs-on: ubuntu-latest
     concurrency:
       group: >-
-        review-pipeline-${{ github.event.pull_request.number
+        pipeline-${{ github.event.pull_request.number
+          || github.event.workflow_run.pull_requests[0].number
           || github.event.issue.number
           || github.event.check_run.pull_requests[0].number
           || github.event.check_run.id
@@ -36,3 +35,11 @@ jobs:
           script: |
             const { run } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/review-pipeline/index.js`);
             await run({ github, context, core });
+
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fluffyx/github-workflows/actions/check-version@main

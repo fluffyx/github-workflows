@@ -8,12 +8,6 @@ permissions:
   packages: read
 
 jobs:
-  check-version:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fluffyx/github-workflows/actions/check-version@main
-
   discover:
     name: discover
     runs-on: ubuntu-latest
@@ -79,9 +73,24 @@ jobs:
         run: bin/brakeman --no-pager
 
       - name: Bundler Audit
-        run: bin/bundler-audit
+        id: bundler-audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          bin/bundler-audit 2>&1 | tee "$RUNNER_TEMP/bundler-audit-output.txt"
 
-  lint:
+      - name: Classify audit result
+        if: steps.bundler-audit.outcome == 'failure'
+        run: |
+          if grep -qE 'Errno::(ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH)|SocketError|Net::(Open|Read)Timeout' "$RUNNER_TEMP/bundler-audit-output.txt"; then
+            printf '::warning::Bundler Audit skipped — advisory database unreachable (network error)\n'
+          else
+            printf '::error::Bundler Audit found vulnerabilities\n'
+            exit 1
+          fi
+
+  check:
     needs: [discover]
     if: "!cancelled() && (needs.discover.result != 'success' || (needs.discover.outputs.frontend_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
@@ -122,11 +131,6 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
         ports:
           - 5432:5432
     env:
@@ -147,6 +151,11 @@ jobs:
         with:
           bundler-cache: true
 
+      - name: Wait for Postgres
+        run: |
+          timeout 60 bash -c 'until pg_isready -h localhost -p 5432 -U postgres -q; do sleep 1; done' \
+            || { echo "::error::Postgres did not become ready within 60s"; exit 1; }
+
       - name: Prepare database
         run: bin/rails db:test:prepare
 
@@ -155,33 +164,3 @@ jobs:
         env:
           COVERAGE: "true"
 
-  pack:
-    needs: [discover]
-    if: "!cancelled() && (needs.discover.result != 'success' || (needs.discover.outputs.frontend_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
-    runs-on: ubuntu-latest
-    env:
-      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
-      BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Configure git auth for private deps
-        if: env.GH_PACKAGES_TOKEN != ''
-        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
-
-      - uses: ruby/setup-ruby@v1
-        with:
-          bundler-cache: true
-
-      - name: Gem build dry-run
-        run: |
-          found=false
-          for gemspec in *.gemspec; do
-            [ -f "$gemspec" ] || continue
-            found=true
-            echo "==> Building $gemspec"
-            gem build "$gemspec"
-          done
-          if [ "$found" = false ]; then
-            echo "No gemspec found — skipping"
-          fi

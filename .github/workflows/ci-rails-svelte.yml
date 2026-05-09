@@ -1,0 +1,214 @@
+name: CI (Rails Svelte)
+
+on:
+  workflow_call:
+    inputs:
+      test_shards:
+        type: number
+        default: 1
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  discover:
+    name: discover
+    runs-on: ubuntu-latest
+    outputs:
+      ruby_tests_only: ${{ steps.classify.outputs.ruby_tests_only }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+      has_frontends: ${{ steps.find.outputs.has_frontends }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dorny/paths-filter@v3
+        id: paths
+        with:
+          token: ''
+          base: ${{ github.base_ref || github.event.repository.default_branch || 'main' }}
+          filters: |
+            ruby_tests:
+              - 'spec/**'
+              - '.rubocop.yml'
+              - '.rubocop_todo.yml'
+            non_ruby_tests_code:
+              - '**'
+              - '!spec/**'
+              - '!.rubocop.yml'
+              - '!.rubocop_todo.yml'
+              - '!**/*.md'
+            any_code:
+              - '**'
+              - '!**/*.md'
+
+      - name: Classify changes
+        id: classify
+        run: |
+          RUBY_TESTS="${{ steps.paths.outputs.ruby_tests }}"
+          NON_RUBY_TESTS="${{ steps.paths.outputs.non_ruby_tests_code }}"
+          ANY_CODE="${{ steps.paths.outputs.any_code }}"
+          if [ "$RUBY_TESTS" = "true" ] && [ "$NON_RUBY_TESTS" = "false" ]; then
+            printf 'ruby_tests_only=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'ruby_tests_only=false\n' >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$ANY_CODE" = "false" ]; then
+            printf 'docs_only=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'docs_only=false\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Find frontend directories
+        id: find
+        run: |
+          if compgen -G 'frontend*/' > /dev/null 2>&1; then
+            echo "has_frontends=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_frontends=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  audit-frontend:
+    name: audit
+    needs: [discover]
+    if: "!cancelled() && needs.discover.outputs.has_frontends == 'true' && (needs.discover.result != 'success' || (needs.discover.outputs.ruby_tests_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
+    runs-on: ubuntu-latest
+    env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend*/pnpm-lock.yaml
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure GitHub Packages auth
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: |
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
+
+      - if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install frontend dependencies
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            echo "==> Installing $dir"
+            pnpm --dir "$dir" install --frozen-lockfile
+          done
+
+      - name: Audit
+        id: audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          bin/audit-frontend 2>&1 | tee "$RUNNER_TEMP/audit-frontend-output.txt"
+
+      - name: Classify audit result
+        if: steps.audit.outcome == 'failure'
+        run: |
+          if grep -qE 'ENOTFOUND|ETIMEDOUT|ECONNREFUSED|ECONNRESET|ERR_SOCKET_TIMEOUT|EAI_AGAIN|EHOSTUNREACH' "$RUNNER_TEMP/audit-frontend-output.txt"; then
+            printf '::warning::Frontend audit skipped — registry unreachable (network error)\n'
+          else
+            printf '::error::Frontend audit found vulnerabilities\n'
+            exit 1
+          fi
+
+  check-frontend:
+    name: check
+    needs: [discover]
+    if: "!cancelled() && needs.discover.outputs.has_frontends == 'true' && (needs.discover.result != 'success' || (needs.discover.outputs.ruby_tests_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
+    runs-on: ubuntu-latest
+    env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend*/pnpm-lock.yaml
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure GitHub Packages auth
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: |
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
+
+      - if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install frontend dependencies
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            echo "==> Installing $dir"
+            pnpm --dir "$dir" install --frozen-lockfile
+          done
+
+      - name: Check
+        run: bin/check
+
+  test-frontend:
+    name: ${{ matrix.shard == 0 && 'test' || format('test {0}', matrix.shard) }}
+    needs: [discover]
+    if: "!cancelled() && needs.discover.result == 'success' && needs.discover.outputs.has_frontends == 'true' && needs.discover.outputs.ruby_tests_only != 'true' && needs.discover.outputs.docs_only != 'true'"
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ inputs.test_shards <= 1 && fromJson('[0]') || inputs.test_shards == 2 && fromJson('[1,2]') || inputs.test_shards == 3 && fromJson('[1,2,3]') || fromJson('[1,2,3,4]') }}
+    runs-on: ubuntu-latest
+    env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend*/pnpm-lock.yaml
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure GitHub Packages auth
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: |
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
+
+      - if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install frontend dependencies
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            echo "==> Installing $dir"
+            pnpm --dir "$dir" install --frozen-lockfile
+          done
+
+      - name: Test
+        run: bin/test-frontend
+        env:
+          COVERAGE: "true"
+          TEST_SHARD: ${{ matrix.shard != 0 && format('{0}/{1}', matrix.shard, inputs.test_shards > 4 && 4 || inputs.test_shards) || '' }}
