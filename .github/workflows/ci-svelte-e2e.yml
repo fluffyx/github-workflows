@@ -1,0 +1,102 @@
+name: CI (Svelte E2E)
+
+on:
+  workflow_call:
+    inputs:
+      e2e_shards:
+        type: number
+        default: 1
+
+permissions:
+  contents: read
+  packages: read
+  checks: write
+
+jobs:
+  e2e:
+    name: ${{ matrix.shard == 0 && 'test' || format('test {0}', matrix.shard) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ inputs.e2e_shards <= 1 && fromJson('[0]') || inputs.e2e_shards == 2 && fromJson('[1,2]') || inputs.e2e_shards == 3 && fromJson('[1,2,3]') || fromJson('[1,2,3,4]') }}
+    runs-on: ubuntu-latest
+    env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure GitHub Packages auth
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: |
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
+
+      - if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 2
+          retry_wait_seconds: 5
+          command: |
+            pnpm exec playwright install --with-deps chromium
+          on_retry_command: |
+            echo "::warning::Playwright install failed — switching apt mirror from Azure to archive.ubuntu.com"
+            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list
+
+      - name: Build
+        run: pnpm exec vite build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Run Playwright tests
+        run: |
+          set -o pipefail
+          pnpm exec vite preview --port 5174 --strictPort &
+          bash -c 'for i in $(seq 1 60); do curl -sfo /dev/null http://localhost:5174 && exit 0 || sleep 0.5; done; exit 1'
+          pnpm exec playwright test ${{ matrix.shard != 0 && format('--shard={0}/{1}', matrix.shard, inputs.e2e_shards > 4 && 4 || inputs.e2e_shards) || '' }} | tee "$RUNNER_TEMP/e2e-output.txt"
+          if ! grep -qE '[0-9]+ passed' "$RUNNER_TEMP/e2e-output.txt"; then
+            echo "::error::No tests were run in this shard"
+            exit 1
+          fi
+
+      - name: E2E test report
+        if: always() && !cancelled()
+        uses: dorny/test-reporter@v1
+        with:
+          name: 'e2e / results ${{ matrix.shard != 0 && matrix.shard || 1 }}'
+          path: 'test-results/junit.xml'
+          reporter: java-junit
+          fail-on-error: false
+        continue-on-error: true
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        if: ${{ always() && !cancelled() }}
+        with:
+          name: ${{ matrix.shard == 0 && 'playwright-report' || format('playwright-report-shard{0}', matrix.shard) }}
+          path: playwright-report/
+          retention-days: 14

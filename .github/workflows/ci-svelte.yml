@@ -1,0 +1,153 @@
+name: CI (Svelte)
+
+on:
+  workflow_call:
+    inputs:
+      test_shards:
+        type: number
+        default: 1
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure GitHub Packages auth
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: |
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
+
+      - if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Audit
+        id: audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          mapfile -t ignore_flags < <(node -e "
+            const cves = require('./package.json').pnpm?.auditConfig?.ignoreCves ?? [];
+            cves.forEach(c => console.log('--ignore=' + c));
+          ")
+          pnpm audit "${ignore_flags[@]}" 2>&1 | tee "$RUNNER_TEMP/audit-frontend-output.txt"
+
+      - name: Classify audit result
+        if: steps.audit.outcome == 'failure'
+        run: |
+          if grep -qE 'ENOTFOUND|ETIMEDOUT|ECONNREFUSED|ECONNRESET|ERR_SOCKET_TIMEOUT|EAI_AGAIN|EHOSTUNREACH' "$RUNNER_TEMP/audit-frontend-output.txt"; then
+            printf '::warning::Frontend audit skipped — registry unreachable (network error)\n'
+          else
+            printf '::error::Frontend audit found vulnerabilities\n'
+            exit 1
+          fi
+
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure GitHub Packages auth
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: |
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
+
+      - if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check
+        run: bin/check
+
+      - name: Build
+        shell: bash
+        run: |
+          set +e
+          BUILD_OUT=$(pnpm run build 2>&1)
+          BUILD_STATUS=$?
+          set -e
+          echo "$BUILD_OUT"
+          if echo "$BUILD_OUT" | grep -q "were likely not generated"; then
+            echo "::error::svelte-package failed to emit .d.ts files for some modules"
+            exit 1
+          fi
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            exit "$BUILD_STATUS"
+          fi
+
+      - name: Pack dry-run
+        run: pnpm pack && tar tf *.tgz
+
+  test:
+    name: ${{ matrix.shard == 0 && 'test' || format('test {0}', matrix.shard) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ inputs.test_shards <= 1 && fromJson('[0]') || inputs.test_shards == 2 && fromJson('[1,2]') || inputs.test_shards == 3 && fromJson('[1,2,3]') || fromJson('[1,2,3,4]') }}
+    runs-on: ubuntu-latest
+    env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure GitHub Packages auth
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: |
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
+
+      - if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm test ${{ matrix.shard != 0 && format('-- --shard={0}/{1}', matrix.shard, inputs.test_shards > 4 && 4 || inputs.test_shards) || '' }}
+        env:
+          COVERAGE: "true"

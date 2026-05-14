@@ -140,7 +140,7 @@ function createHelpers({ github, context, core }) {
     }
   }
 
-  async function requestCharlieReview(prNumber) {
+  async function removeCharlieReview(prNumber) {
     try {
       await github.rest.pulls.removeRequestedReviewers({
         owner,
@@ -153,6 +153,12 @@ function createHelpers({ github, context, core }) {
         throw error;
       }
     }
+
+    core.info(`Removed review request from ${CHARLIE_REVIEWER} on PR #${prNumber}`);
+  }
+
+  async function requestCharlieReview(prNumber) {
+    await removeCharlieReview(prNumber);
 
     await github.rest.pulls.requestReviewers({
       owner,
@@ -237,6 +243,7 @@ function createHelpers({ github, context, core }) {
     createComment,
     getPullRequest,
     getCollaboratorPermission,
+    removeCharlieReview,
     requestCharlieReview,
     createPendingCheck,
     completeCheck,

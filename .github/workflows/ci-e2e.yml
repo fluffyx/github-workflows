@@ -1,0 +1,298 @@
+name: CI (E2E)
+
+on:
+  workflow_call:
+    inputs:
+      e2e_shards:
+        type: number
+        default: 1
+      e2e_suite_shards:
+        type: string
+        default: '{}'
+
+permissions:
+  contents: read
+  packages: read
+  checks: write
+
+jobs:
+  discover:
+    name: discover
+    runs-on: ubuntu-latest
+    outputs:
+      skip_e2e: ${{ steps.classify.outputs.skip_e2e }}
+      has_e2e: ${{ steps.find.outputs.has_e2e }}
+      matrix: ${{ steps.find.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dorny/paths-filter@v4
+        id: paths
+        with:
+          token: ''
+          base: ${{ github.base_ref || github.event.repository.default_branch || 'main' }}
+          filters: |
+            e2e_relevant:
+              - '**'
+              - '!**/*.md'
+              - '!spec/**'
+              - '!.rubocop.yml'
+              - '!.rubocop_todo.yml'
+              - '!.github/**'
+              - '!Dockerfile*'
+              - '!docker-compose*'
+              - '!.dockerignore'
+              - '!render.yaml'
+              - '!railway.toml'
+              - '!.kamal/**'
+              - '!deploy/**'
+              - '!Procfile*'
+              - '!Caddyfile*'
+              - '!vercel.json'
+              - '!.gitignore'
+              - '!.gitattributes'
+              - '!lefthook.yml'
+              - '!conductor.json'
+              - '!LICENSE'
+
+      - name: Classify changes
+        id: classify
+        run: |
+          E2E_RELEVANT="${{ steps.paths.outputs.e2e_relevant }}"
+          if [ "$E2E_RELEVANT" = "false" ]; then
+            printf 'skip_e2e=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'skip_e2e=false\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check for E2E tests
+        id: find
+        env:
+          SUITE_SHARDS: ${{ inputs.e2e_suite_shards }}
+          DEFAULT_SHARDS: ${{ inputs.e2e_shards }}
+        run: |
+          suites=()
+          for dir in frontend*/; do
+            [ -d "${dir}tests/e2e" ] || continue
+            suites+=("${dir%/}")
+          done
+          if [ ${#suites[@]} -gt 0 ] && [ -x bin/dev-e2e ]; then
+            printf 'has_e2e=true\n' >> "$GITHUB_OUTPUT"
+            matrix='[]'
+            for suite in "${suites[@]}"; do
+              count=$(printf '%s' "$SUITE_SHARDS" | jq -re --arg s "$suite" --argjson d "$DEFAULT_SHARDS" '
+                (.[$s] // $d) as $n
+                | if (($n | type) == "number") and ($n == ($n | floor)) and ($n >= 1)
+                  then $n
+                  else error("Shard count for \($s) must be a positive integer (got \($n))")
+                  end
+              ')
+              if [ "$count" -eq 1 ]; then
+                matrix=$(printf '%s' "$matrix" | jq -c --arg suite "$suite" '. + [{"suite": $suite, "shard": 0, "shard_total": 1}]')
+              else
+                for i in $(seq 1 "$count"); do
+                  matrix=$(printf '%s' "$matrix" | jq -c --arg suite "$suite" --argjson shard "$i" --argjson total "$count" '. + [{"suite": $suite, "shard": $shard, "shard_total": $total}]')
+                done
+              fi
+            done
+            printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+          else
+            printf 'has_e2e=false\n' >> "$GITHUB_OUTPUT"
+            printf 'matrix=[]\n' >> "$GITHUB_OUTPUT"
+          fi
+
+  e2e:
+    name: "${{ matrix.suite }} / ${{ matrix.shard == 0 && 'test' || format('test {0}', matrix.shard) }}"
+    needs: [discover]
+    if: "!cancelled() && needs.discover.result == 'success' && needs.discover.outputs.has_e2e == 'true' && needs.discover.outputs.skip_e2e != 'true'"
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.discover.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+    env:
+      DB_HOST: localhost
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      RAILS_ENV: test
+      DEV_PORT: "4100"
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+      VITE_STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_TEST_PUBLISHABLE_KEY }}
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+      BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
+      SUITE: ${{ matrix.suite }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure git auth for private deps
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure GitHub Packages auth
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: |
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
+
+      - name: Locate pnpm store
+        id: pnpm-store
+        run: printf 'path=%s\n' "$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('frontend*/pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+
+      - name: Install frontend dependencies
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            pnpm --dir "$dir" install --frozen-lockfile
+          done
+
+      - name: Cache Vite pre-bundled deps
+        uses: actions/cache@v5
+        with:
+          path: frontend*/node_modules/.vite
+          key: vite-deps-${{ runner.os }}-${{ hashFiles('frontend*/pnpm-lock.yaml', 'frontend*/vite.config.ts') }}
+          restore-keys: vite-deps-${{ runner.os }}-
+
+      - name: Resolve Caddy arch
+        id: caddy-arch
+        run: |
+          case "${{ runner.arch }}" in
+            X64)   echo "arch=amd64" >> "$GITHUB_OUTPUT" ;;
+            ARM64) echo "arch=arm64" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Unsupported arch: ${{ runner.arch }}" >&2; exit 1 ;;
+          esac
+
+      - name: Cache Caddy binary
+        id: caddy-cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/caddy
+          key: caddy-${{ runner.os }}-${{ runner.arch }}-2.9.1
+
+      - name: Download Caddy
+        if: steps.caddy-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_${{ steps.caddy-arch.outputs.arch }}.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" caddy
+
+      - name: Install Caddy
+        run: |
+          sudo cp "$RUNNER_TEMP/caddy" /usr/local/bin/caddy
+          sudo chmod +x /usr/local/bin/caddy
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ matrix.suite }}-${{ hashFiles(format('{0}/pnpm-lock.yaml', matrix.suite)) }}
+          restore-keys: playwright-${{ runner.os }}-${{ matrix.suite }}-
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 2
+          retry_wait_seconds: 5
+          command: pnpm --dir "$SUITE" exec playwright install --with-deps chromium
+          on_retry_command: |
+            echo "::warning::Playwright install failed — switching apt mirror from Azure to archive.ubuntu.com"
+            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list
+
+      - name: Wait for Postgres
+        run: |
+          timeout 60 bash -c 'until pg_isready -h localhost -p 5432 -U postgres -q; do sleep 1; done' \
+            || { echo "::error::Postgres did not become ready within 60s"; exit 1; }
+
+      - name: Prepare database
+        run: bin/rails db:test:prepare
+
+      - name: Generate GraphQL types
+        run: |
+          for dir in frontend*/; do
+            [ -f "$dir/package.json" ] || continue
+            pnpm --dir "$dir" run --if-present codegen
+          done
+
+      - name: Start dev server
+        run: |
+          mkdir -p tmp/logs
+          setsid bin/dev-e2e </dev/null >tmp/logs/dev-e2e.log 2>&1 &
+          echo "DEV_E2E_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for dev server
+        run: |
+          if [ -x bin/ci/wait-for-e2e ]; then
+            bin/ci/wait-for-e2e "$SUITE"
+          elif [ -x bin/wait-for-e2e ]; then
+            bin/wait-for-e2e "$SUITE"
+          else
+            echo "::error::No readiness probe found. Create bin/ci/wait-for-e2e — see https://github.com/fluffyx/billiedoby-scheduling/blob/staging/bin/ci/wait-for-e2e for a reference implementation."
+            echo "::error::The previous localhost-only fallback caused silent partial-readiness failures and has been removed."
+            exit 1
+          fi
+
+      - name: Run E2E tests
+        run: |
+          set -o pipefail
+          (cd "$SUITE" && npx playwright test --config tests/e2e/playwright.config.ts ${{ matrix.shard != 0 && format('--shard={0}/{1}', matrix.shard, matrix.shard_total) || '' }} --max-failures 1) | tee "$RUNNER_TEMP/e2e-output.txt"
+          if ! grep -qE '[0-9]+ passed' "$RUNNER_TEMP/e2e-output.txt"; then
+            echo "::error::No tests were run in this shard"
+            exit 1
+          fi
+        env:
+          CI: "true"
+          DEV_E2E_RUNNING: "true"
+
+      - name: E2E test report
+        if: always() && !cancelled()
+        uses: dorny/test-reporter@v1
+        with:
+          name: 'e2e / ${{ matrix.suite }} / results ${{ matrix.shard != 0 && matrix.shard || 1 }}'
+          path: '${{ matrix.suite }}/test-results/junit.xml'
+          reporter: java-junit
+          fail-on-error: false
+        continue-on-error: true
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-${{ matrix.suite }}-shard${{ matrix.shard }}
+          path: |
+            frontend*/test-results/
+            tmp/logs/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Stop dev server
+        if: always()
+        run: kill -- "-$DEV_E2E_PID" 2>/dev/null || kill "$DEV_E2E_PID" 2>/dev/null || true

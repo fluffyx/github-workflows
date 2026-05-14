@@ -15,11 +15,12 @@ permissions:
   pull-requests: write
 
 jobs:
-  review-pipeline:
+  pipeline:
     runs-on: ubuntu-latest
     concurrency:
       group: >-
-        review-pipeline-${{ github.event.pull_request.number
+        pipeline-${{ github.event.pull_request.number
+          || github.event.workflow_run.pull_requests[0].number
           || github.event.issue.number
           || github.event.check_run.pull_requests[0].number
           || github.event.check_run.id
@@ -43,3 +44,12 @@ jobs:
             const { run } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/review-pipeline/index.js`);
             const options = { greptile: process.env.INPUT_GREPTILE === 'true' };
             await run({ github, context, core, options });
+            await run({ github, context, core, options });
+
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fluffyx/github-workflows/actions/check-version@main

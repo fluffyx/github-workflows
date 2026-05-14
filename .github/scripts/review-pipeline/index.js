@@ -1,6 +1,7 @@
 const { createHelpers } = require('./github-helpers.js');
 const { handlePullRequest } = require('./events/pull-request.js');
 const { handlePullRequestReview } = require('./events/pull-request-review.js');
+const { handleWorkflowRun } = require('./events/workflow-run.js');
 // Greptile/Macroscope check-run and comment handlers are disabled.
 // Uncomment these handlers to re-enable the full review pipeline.
 // const { handleCheckRun } = require('./events/check-run.js');
@@ -9,6 +10,7 @@ const { handlePullRequestReview } = require('./events/pull-request-review.js');
 const HANDLERS = {
   pull_request: handlePullRequest,
   pull_request_review: handlePullRequestReview,
+  workflow_run: handleWorkflowRun,
   // check_run: handleCheckRun,
   // issue_comment: handleIssueComment,
 };

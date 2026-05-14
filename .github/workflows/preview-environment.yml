@@ -1,0 +1,302 @@
+name: Preview Environment
+
+on:
+  workflow_call:
+    inputs:
+      render_service_name:
+        description: Render service name for constructing the preview hostname
+        type: string
+        required: true
+      preview_origin_regex:
+        description: CORS regex for Vercel preview URLs
+        type: string
+        required: true
+      vercel_project_ids:
+        description: 'JSON array of {name, var_name} objects for each frontend app. var_name is the name of a repository variable holding the Vercel project ID.'
+        type: string
+        required: true
+      label_name:
+        description: PR label that gates preview deployment
+        type: string
+        default: render-preview
+    secrets:
+      NEON_PROJECT_ID:
+        required: true
+      NEON_API_KEY:
+        required: true
+      RENDER_API_KEY:
+        required: true
+      RENDER_SERVICE_ID:
+        required: true
+      VERCEL_TOKEN:
+        required: true
+      VERCEL_ORG_ID:
+        required: true
+      GH_PACKAGES_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+  deployments: write
+  pull-requests: write
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-preview:
+    name: deploy
+    if: |
+      github.event.action != 'closed' &&
+      github.event.action != 'unlabeled' &&
+      contains(github.event.pull_request.labels.*.name, inputs.label_name)
+    runs-on: ubuntu-latest
+    env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create Neon branch
+        id: neon
+        uses: neondatabase/create-branch-action@v5
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          branch_name: preview/pr-${{ github.event.pull_request.number }}
+
+      - name: Validate Neon branch
+        env:
+          DB_URL: ${{ steps.neon.outputs.db_url }}
+        run: |
+          if [ -z "$DB_URL" ]; then
+            echo "::error::Neon branch created but db_url output is empty"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure GitHub Packages auth
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: |
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          printf 'NPM_CONFIG_USERCONFIG=%s/.npmrc\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Deploy Render and Vercel
+        id: deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          DATABASE_URL: ${{ steps.neon.outputs.db_url }}
+          PREVIEW_ORIGIN_REGEX: ${{ inputs.preview_origin_regex }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          ALL_VARS: ${{ toJSON(vars) }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          RENDER_SERVICE_NAME: ${{ inputs.render_service_name }}
+          VERCEL_PROJECTS: ${{ inputs.vercel_project_ids }}
+        run: |
+          # --- Render (background) ---
+          (
+            retry_delay=15
+            timeout=300
+            max_retries=$(( timeout / retry_delay ))
+            PREVIEW_ID=""
+            for i in $(seq 1 "$max_retries"); do
+              RESPONSE=$(curl -sf \
+                "https://api.render.com/v1/services?type=web_service&includePreviews=true&limit=50" \
+                -H "Authorization: Bearer ${RENDER_API_KEY}") || {
+                echo "Render API request failed ($i/$max_retries)"
+                if [ "$i" -lt "$max_retries" ]; then sleep "$retry_delay"; fi
+                continue
+              }
+              PREVIEW_ID=$(printf '%s' "$RESPONSE" | jq -r \
+                --arg branch "$PR_BRANCH" \
+                --arg parent "$RENDER_SERVICE_ID" \
+                '[.[] | select(
+                  .service.branch == $branch and
+                  .service.serviceDetails.parentServer.id == $parent
+                )] | first | .service.id // empty')
+              if [ -n "$PREVIEW_ID" ]; then break; fi
+              echo "Preview instance not found yet ($i/$max_retries)"
+              if [ "$i" -lt "$max_retries" ]; then sleep "$retry_delay"; fi
+            done
+            if [ -z "$PREVIEW_ID" ]; then
+              echo "::error::Could not find Render preview instance for branch ${PR_BRANCH}"
+              echo "::error::API returned: $(printf '%s' "$RESPONSE" | jq -c '[.[] | {name: .service.name, branch: .service.branch, parent: .service.serviceDetails.parentServer.id?}]')"
+              exit 1
+            fi
+            echo "Found preview instance: ${PREVIEW_ID}"
+
+            set_env_var() {
+              local payload
+              payload=$(jq -n --arg v "$2" '{value: $v}')
+              curl -sf -X PUT \
+                "https://api.render.com/v1/services/${PREVIEW_ID}/env-vars/$1" \
+                -H "Authorization: Bearer ${RENDER_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "$payload" || exit 1
+            }
+            set_env_var DATABASE_URL "${DATABASE_URL}"
+            set_env_var PREVIEW_ORIGIN_REGEX "${PREVIEW_ORIGIN_REGEX}"
+            set_env_var SENTRY_ENVIRONMENT preview
+            set_env_var PREVIEW_DB_CONFIGURED true
+
+            curl -sf -X POST \
+              "https://api.render.com/v1/services/${PREVIEW_ID}/deploys" \
+              -H "Authorization: Bearer ${RENDER_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d '{}' || exit 1
+          ) &
+          RENDER_PID=$!
+          trap 'kill $RENDER_PID 2>/dev/null || true; wait $RENDER_PID 2>/dev/null || true' EXIT
+
+          # --- Vercel (foreground) ---
+          printf '%s' "$VERCEL_PROJECTS" | jq empty || { echo "::error::Invalid JSON in vercel_project_ids"; exit 1; }
+          RENDER_HOST="${RENDER_SERVICE_NAME}-pr-${PR_NUMBER}.onrender.com"
+          RESULTS="[]"
+          while IFS= read -r project; do
+            NAME=$(printf '%s' "$project" | jq -r '.name')
+            VAR_NAME=$(printf '%s' "$project" | jq -r '.var_name')
+            PROJECT_ID=$(printf '%s' "$ALL_VARS" | jq -r --arg k "$VAR_NAME" '.[$k]')
+            if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ]; then
+              echo "::error::Variable ${VAR_NAME} not found for project ${NAME}"
+              exit 1
+            fi
+            export VERCEL_PROJECT_ID="$PROJECT_ID"
+            npx vercel pull --yes --environment=preview --token "$VERCEL_TOKEN" >/dev/null || {
+              echo "::error::vercel pull failed for project ${NAME} (${PROJECT_ID})"
+              exit 1
+            }
+            URL=$(npx vercel deploy --token "$VERCEL_TOKEN" --yes --no-clipboard \
+              --env "API_BACKEND_URL=https://${RENDER_HOST}" \
+              --meta githubCommitRef="${PR_BRANCH}" \
+              --meta githubCommitSha="${PR_SHA}" \
+              --meta githubCommitMessage="PR #${PR_NUMBER}: ${PR_TITLE}" \
+              --meta githubPrId="${PR_NUMBER}" 2>/dev/null | tail -1)
+            RESULTS=$(printf '%s' "$RESULTS" | jq -c --arg name "$NAME" --arg url "$URL" '. + [{"name": $name, "url": $url}]')
+          done < <(printf '%s' "$VERCEL_PROJECTS" | jq -c '.[]')
+          printf 'urls=%s\n' "$RESULTS" >> "$GITHUB_OUTPUT"
+
+          # --- Wait for Render ---
+          render_result=0
+          wait $RENDER_PID || render_result=$?
+          if [ "$render_result" -ne 0 ]; then
+            echo "::error::Render deploy failed"
+            exit 1
+          fi
+
+      - name: Clean up Render preview deployments
+        uses: actions/github-script@v7
+        env:
+          RENDER_SERVICE_NAME: ${{ inputs.render_service_name }}
+        with:
+          script: |
+            const serviceName = process.env.RENDER_SERVICE_NAME;
+            const deployments = await github.paginate(github.rest.repos.listDeployments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.payload.pull_request.head.ref,
+              per_page: 100,
+            });
+            for (const deployment of deployments) {
+              if (!deployment.environment.includes(serviceName)) continue;
+              const statuses = await github.rest.repos.listDeploymentStatuses({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                deployment_id: deployment.id,
+                per_page: 1,
+              });
+              if (statuses.data[0]?.state !== 'inactive') {
+                await github.rest.repos.createDeploymentStatus({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  deployment_id: deployment.id,
+                  state: 'inactive',
+                });
+              }
+              await github.rest.repos.deleteDeployment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                deployment_id: deployment.id,
+              });
+            }
+
+      - name: Create GitHub preview deployments
+        uses: actions/github-script@v7
+        env:
+          VERCEL_URLS: ${{ steps.deploy.outputs.urls }}
+          RENDER_HOST: ${{ inputs.render_service_name }}-pr-${{ github.event.pull_request.number }}.onrender.com
+        with:
+          script: |
+            const prNum = context.issue.number;
+            const sha = context.payload.pull_request.head.sha;
+            const apps = [
+              ...JSON.parse(process.env.VERCEL_URLS).map(a => ({ name: a.name, url: a.url })),
+              { name: 'API', url: `https://${process.env.RENDER_HOST}` },
+            ];
+            for (const app of apps) {
+              const deployment = await github.rest.repos.createDeployment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: sha,
+                environment: `${app.name} (PR #${prNum} preview)`,
+                auto_merge: false,
+                required_contexts: [],
+                transient_environment: true,
+                production_environment: false,
+              });
+              if (deployment.data?.id) {
+                await github.rest.repos.createDeploymentStatus({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  deployment_id: deployment.data.id,
+                  state: 'success',
+                  environment_url: app.url,
+                  log_url: app.url,
+                  description: `${app.name} preview`,
+                });
+              } else {
+                core.warning(`createDeployment for ${app.name} did not return an id; skipping status`);
+              }
+            }
+
+  teardown-preview:
+    name: teardown
+    if: |
+      (github.event.action == 'closed' && contains(github.event.pull_request.labels.*.name, inputs.label_name)) ||
+      (github.event.action == 'unlabeled' && github.event.label.name == inputs.label_name)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deactivate GitHub preview deployments
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const suffix = ` (PR #${context.issue.number} preview)`;
+            const deployments = await github.paginate(github.rest.repos.listDeployments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            for (const deployment of deployments) {
+              if (!deployment.environment.endsWith(suffix)) continue;
+              await github.rest.repos.createDeploymentStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                deployment_id: deployment.id,
+                state: 'inactive',
+              });
+            }
+
+      - name: Delete Neon branch
+        uses: neondatabase/delete-branch-action@v3
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          branch: preview/pr-${{ github.event.pull_request.number }}

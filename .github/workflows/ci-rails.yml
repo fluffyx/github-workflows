@@ -8,34 +8,62 @@ permissions:
   packages: read
 
 jobs:
-  check-version:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fluffyx/github-workflows/actions/check-version@main
-
-  discover_frontends:
+  discover:
+    name: discover
     runs-on: ubuntu-latest
     outputs:
-      has_frontends: ${{ steps.find.outputs.has_frontends }}
+      frontend_only: ${{ steps.classify.outputs.frontend_only }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
     steps:
       - uses: actions/checkout@v6
 
-      - name: Find frontend directories
-        id: find
+      - uses: dorny/paths-filter@v4
+        id: paths
+        with:
+          token: ''
+          base: ${{ github.base_ref || github.event.repository.default_branch || 'main' }}
+          filters: |
+            frontend:
+              - 'frontend*/**'
+            non_frontend_code:
+              - '**'
+              - '!frontend*/**'
+              - '!**/*.md'
+            any_code:
+              - '**'
+              - '!**/*.md'
+
+      - name: Classify changes
+        id: classify
         run: |
-          if ls -d frontend frontend-* >/dev/null 2>&1; then
-            echo "has_frontends=true" >> "$GITHUB_OUTPUT"
+          FRONTEND="${{ steps.paths.outputs.frontend }}"
+          NON_FRONTEND="${{ steps.paths.outputs.non_frontend_code }}"
+          ANY_CODE="${{ steps.paths.outputs.any_code }}"
+          if [ "$FRONTEND" = "true" ] && [ "$NON_FRONTEND" = "false" ]; then
+            printf 'frontend_only=true\n' >> "$GITHUB_OUTPUT"
           else
-            echo "has_frontends=false" >> "$GITHUB_OUTPUT"
+            printf 'frontend_only=false\n' >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$ANY_CODE" = "false" ]; then
+            printf 'docs_only=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'docs_only=false\n' >> "$GITHUB_OUTPUT"
           fi
 
-  scan_ruby:
+  audit-ruby:
+    name: audit
+    needs: [discover]
+    if: "!cancelled() && (needs.discover.result != 'success' || (needs.discover.outputs.frontend_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
       BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
     steps:
       - uses: actions/checkout@v6
+
+      - name: Configure git auth for private deps
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -45,15 +73,37 @@ jobs:
         run: bin/brakeman --no-pager
 
       - name: Bundler Audit
-        run: bin/bundler-audit
+        id: bundler-audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          bin/bundler-audit 2>&1 | tee "$RUNNER_TEMP/bundler-audit-output.txt"
 
-  lint:
+      - name: Classify audit result
+        if: steps.bundler-audit.outcome == 'failure'
+        run: |
+          if grep -qE 'Errno::(ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH)|SocketError|Net::(Open|Read)Timeout' "$RUNNER_TEMP/bundler-audit-output.txt"; then
+            printf '::warning::Bundler Audit skipped — advisory database unreachable (network error)\n'
+          else
+            printf '::error::Bundler Audit found vulnerabilities\n'
+            exit 1
+          fi
+
+  check:
+    needs: [discover]
+    if: "!cancelled() && (needs.discover.result != 'success' || (needs.discover.outputs.frontend_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     env:
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
       RUBOCOP_CACHE_ROOT: tmp/rubocop
       BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
     steps:
       - uses: actions/checkout@v6
+
+      - name: Configure git auth for private deps
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -72,6 +122,8 @@ jobs:
         run: bin/rubocop -f github
 
   test:
+    needs: [discover]
+    if: "!cancelled() && (needs.discover.result != 'success' || (needs.discover.outputs.frontend_only != 'true' && needs.discover.outputs.docs_only != 'true'))"
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -79,11 +131,6 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
         ports:
           - 5432:5432
     env:
@@ -91,13 +138,23 @@ jobs:
       DB_USER: postgres
       DB_PASSWORD: postgres
       RAILS_ENV: test
+      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
       BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
     steps:
       - uses: actions/checkout@v6
 
+      - name: Configure git auth for private deps
+        if: env.GH_PACKAGES_TOKEN != ''
+        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+
       - uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
+
+      - name: Wait for Postgres
+        run: |
+          timeout 60 bash -c 'until pg_isready -h localhost -p 5432 -U postgres -q; do sleep 1; done' \
+            || { echo "::error::Postgres did not become ready within 60s"; exit 1; }
 
       - name: Prepare database
         run: bin/rails db:test:prepare
@@ -107,139 +164,3 @@ jobs:
         env:
           COVERAGE: "true"
 
-  pack:
-    runs-on: ubuntu-latest
-    env:
-      BUNDLE_RUBYGEMS__PKG__GITHUB__COM: ${{ secrets.GH_PACKAGES_TOKEN }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: ruby/setup-ruby@v1
-        with:
-          bundler-cache: true
-
-      - name: Gem build dry-run
-        run: |
-          found=false
-          for gemspec in *.gemspec; do
-            [ -f "$gemspec" ] || continue
-            found=true
-            echo "==> Building $gemspec"
-            gem build "$gemspec"
-          done
-          if [ "$found" = false ]; then
-            echo "No gemspec found — skipping"
-          fi
-
-  audit_frontend:
-    needs: discover_frontends
-    if: needs.discover_frontends.outputs.has_frontends == 'true'
-    runs-on: ubuntu-latest
-    env:
-      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v5
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: frontend*/pnpm-lock.yaml
-          registry-url: https://npm.pkg.github.com
-
-      - name: Configure GitHub Packages auth
-        if: env.GH_PACKAGES_TOKEN != ''
-        run: |
-          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
-          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
-
-      - name: Install frontend dependencies
-        run: |
-          for dir in frontend*/; do
-            [ -f "$dir/package.json" ] || continue
-            echo "==> Installing $dir"
-            pnpm --dir "$dir" install --frozen-lockfile
-          done
-
-      - name: Audit
-        run: bin/audit-frontend
-
-  check_frontend:
-    needs: discover_frontends
-    if: needs.discover_frontends.outputs.has_frontends == 'true'
-    runs-on: ubuntu-latest
-    env:
-      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v5
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: frontend*/pnpm-lock.yaml
-          registry-url: https://npm.pkg.github.com
-
-      - name: Configure GitHub Packages auth
-        if: env.GH_PACKAGES_TOKEN != ''
-        run: |
-          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
-          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
-
-      - name: Install frontend dependencies
-        run: |
-          for dir in frontend*/; do
-            [ -f "$dir/package.json" ] || continue
-            echo "==> Installing $dir"
-            pnpm --dir "$dir" install --frozen-lockfile
-          done
-
-      - name: Check
-        run: bin/check
-
-  test_frontend:
-    needs: discover_frontends
-    if: needs.discover_frontends.outputs.has_frontends == 'true'
-    runs-on: ubuntu-latest
-    env:
-      GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v5
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: frontend*/pnpm-lock.yaml
-          registry-url: https://npm.pkg.github.com
-
-      - name: Configure GitHub Packages auth
-        if: env.GH_PACKAGES_TOKEN != ''
-        run: |
-          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
-          echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
-
-      - name: Install frontend dependencies
-        run: |
-          for dir in frontend*/; do
-            [ -f "$dir/package.json" ] || continue
-            echo "==> Installing $dir"
-            pnpm --dir "$dir" install --frozen-lockfile
-          done
-
-      - name: Test
-        run: bin/test-frontend
-        env:
-          COVERAGE: "true"

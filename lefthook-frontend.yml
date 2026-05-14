@@ -1,0 +1,64 @@
+# Shared frontend pre-commit checks for fluffyx repos.
+#
+# Assumes the consumer follows the bin/ convention from this repo's
+# README: bin/format (auto-fix) and bin/typecheck (read-only types).
+# Single-package repos add a 2-line bin/typecheck shim if needed:
+#
+#   #!/usr/bin/env bash
+#   exec pnpm check "$@"
+#
+# Globs are deliberately permissive — bin/format and bin/typecheck are
+# expected to know which files in their tree to act on (e.g., billiedoby's
+# bin/format filters staged files to frontend*/ subdirs internally). Override
+# any single job in the consumer's local lefthook.yml by re-declaring it
+# under the same name; lefthook merges remote + local by name.
+
+pre-commit:
+  jobs:
+    - name: frontend-lint
+      glob: "**/*.{ts,js,json,css,scss,svelte,graphql,gql}"
+      run: bin/format {staged_files}
+      stage_fixed: true
+
+    - name: frontend-typecheck
+      glob: "**/*.{ts,svelte,graphql,gql}"
+      run: bin/typecheck
+
+    - name: node-modules-freshness
+      glob: "**/{package.json,pnpm-lock.yaml}"
+      run: |
+        shopt -s nullglob
+        check_dir() {
+          local dir="$1"
+          if [ -f "$dir/pnpm-lock.yaml" ]; then
+            if [ ! -f "$dir/node_modules/.modules.yaml" ] || [ "$dir/pnpm-lock.yaml" -nt "$dir/node_modules/.modules.yaml" ]; then
+              echo "❌ $dir/node_modules is out of date with its lockfile. Run: cd $dir && pnpm install"
+              return 1
+            fi
+          fi
+        }
+        failed=0
+        if [ -f "package.json" ]; then
+          check_dir "." || failed=1
+        fi
+        for dir in frontend frontend-*; do
+          if [ -d "$dir" ]; then
+            check_dir "$dir" || failed=1
+          fi
+        done
+        exit "$failed"
+
+    - name: lockfile-frozen
+      glob: "**/{package.json,pnpm-lock.yaml}"
+      run: |
+        shopt -s nullglob
+        failed=0
+        if [ -f "package.json" ] && [ -f "pnpm-lock.yaml" ]; then
+          pnpm install --frozen-lockfile --ignore-scripts || failed=1
+        fi
+        for dir in frontend frontend-*; do
+          if [ -d "$dir" ] && [ -f "$dir/pnpm-lock.yaml" ]; then
+            (cd "$dir" && pnpm install --frozen-lockfile --ignore-scripts) || failed=1
+          fi
+        done
+        exit "$failed"
