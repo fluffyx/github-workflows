@@ -43,7 +43,7 @@ For check-run purposes, categories 1-4 are failures. Non-blocking feedback still
 
 A single sentence:
 
-```
+```text
 Reviewed the latest changes, and I don't have actionable feedback to address.
 ```
 

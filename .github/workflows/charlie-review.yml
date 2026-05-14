@@ -44,7 +44,6 @@ jobs:
             const { run } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/review-pipeline/index.js`);
             const options = { greptile: process.env.INPUT_GREPTILE === 'true' };
             await run({ github, context, core, options });
-            await run({ github, context, core, options });
 
   version:
     runs-on: ubuntu-latest
