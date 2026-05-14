@@ -171,6 +171,25 @@ function createHelpers({ github, context, core }) {
   }
 
   async function createPendingCheck(headSha) {
+    const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+      owner,
+      repo,
+      ref: headSha,
+      check_name: CHARLIE_CHECK_NAME,
+      per_page: 100,
+    });
+    const existing = checkRuns.find(
+      (checkRun) =>
+        checkRun.name === CHARLIE_CHECK_NAME &&
+        checkRun.head_sha === headSha &&
+        checkRun.status === 'in_progress',
+    );
+
+    if (existing) {
+      core.info(`Reusing existing in-progress ${CHARLIE_CHECK_NAME} check (id=${existing.id}) for ${headSha}`);
+      return;
+    }
+
     await github.rest.checks.create({
       owner,
       repo,

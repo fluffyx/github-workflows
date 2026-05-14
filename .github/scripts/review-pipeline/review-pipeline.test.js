@@ -29,8 +29,10 @@ test('createPendingCheck creates an in-progress charliecreates check run', async
       rest: {
         checks: {
           create: async (params) => created.push(params),
+          listForRef: async () => {},
         },
       },
+      paginate: async () => [],
     },
     context: { repo: { owner: 'fluffyx', repo: 'demo' } },
     core: createCore(),
@@ -51,6 +53,31 @@ test('createPendingCheck creates an in-progress charliecreates check run', async
       },
     },
   ]);
+});
+
+test('createPendingCheck reuses an existing in-progress check run', async () => {
+  const created = [];
+  const core = createCore();
+  const helpers = createHelpers({
+    github: {
+      rest: {
+        checks: {
+          create: async (params) => created.push(params),
+          listForRef: async () => {},
+        },
+      },
+      paginate: async () => [
+        { id: 99, name: 'charliecreates', head_sha: 'abc123', status: 'in_progress' },
+      ],
+    },
+    context: { repo: { owner: 'fluffyx', repo: 'demo' } },
+    core,
+  });
+
+  await helpers.createPendingCheck('abc123');
+
+  assert.equal(created.length, 0);
+  assert.ok(core.messages.some((m) => m.includes('Reusing existing')));
 });
 
 test('completeCheck updates the existing charliecreates check run for the head SHA', async () => {
