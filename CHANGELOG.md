@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- `ci-e2e.yml`: git auth now rewrites ssh:// and git@github.com: in addition to https:// (synced from billiedoby)
+- `ci-e2e.yml`: npmrc now includes `@faultless-tech` registry scope alongside `@fluffyx` (synced from billiedoby)
+
 - Renamed `ci-svelte.yml` → `ci-rails-svelte.yml` (SvelteKit jobs for Rails apps)
 - Renamed `ci-frontend.yml` → `ci-svelte.yml` (standalone SvelteKit repos)
 - Renamed all `ci-frontend-*` workflows to `ci-svelte-*`
