@@ -134,7 +134,10 @@ jobs:
 
       - name: Configure git auth for private deps
         if: env.GH_PACKAGES_TOKEN != ''
-        run: git config --global url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+        run: |
+          git config --global --add url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global --add url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global --add url."https://x-access-token:${GH_PACKAGES_TOKEN}@github.com/".insteadOf "git@github.com:"
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -152,7 +155,7 @@ jobs:
       - name: Configure GitHub Packages auth
         if: env.GH_PACKAGES_TOKEN != ''
         run: |
-          printf '@fluffyx:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
+          printf '@fluffyx:registry=https://npm.pkg.github.com\n@faultless-tech:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}\n' >"$RUNNER_TEMP/.npmrc"
           echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/.npmrc" >> "$GITHUB_ENV"
 
       - name: Locate pnpm store
