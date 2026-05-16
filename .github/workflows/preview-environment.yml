@@ -148,11 +148,48 @@ jobs:
             set_env_var SENTRY_ENVIRONMENT preview
             set_env_var PREVIEW_DB_CONFIGURED true
 
-            curl -sf -X POST \
+            DEPLOY_RESPONSE=$(curl -sf -X POST \
               "https://api.render.com/v1/services/${PREVIEW_ID}/deploys" \
               -H "Authorization: Bearer ${RENDER_API_KEY}" \
               -H "Content-Type: application/json" \
-              -d '{}' || exit 1
+              -d '{}') || exit 1
+            DEPLOY_ID=$(printf '%s' "$DEPLOY_RESPONSE" | jq -r '.id // empty')
+            if [ -z "$DEPLOY_ID" ]; then
+              echo "::error::Failed to parse deploy ID from Render response: ${DEPLOY_RESPONSE}"
+              exit 1
+            fi
+            echo "Render deploy triggered: ${DEPLOY_ID}"
+
+            deploy_retry=20
+            deploy_max=$(( 600 / deploy_retry ))
+            DEPLOY_STATUS=""
+            for i in $(seq 1 "$deploy_max"); do
+              DEPLOY_STATUS=$(curl -sf \
+                "https://api.render.com/v1/services/${PREVIEW_ID}/deploys/${DEPLOY_ID}" \
+                -H "Authorization: Bearer ${RENDER_API_KEY}" | jq -r '.status // empty') || {
+                echo "Deploy status check failed ($i/$deploy_max), retrying"
+                sleep "$deploy_retry"
+                continue
+              }
+              echo "Render deploy status: ${DEPLOY_STATUS} ($i/$deploy_max)"
+              case "$DEPLOY_STATUS" in
+                live) break ;;
+                build_failed|update_failed|canceled|deactivated)
+                  echo "::error::Render deploy failed with status: ${DEPLOY_STATUS}"
+                  exit 1
+                  ;;
+              esac
+              sleep "$deploy_retry"
+            done
+            if [ "$DEPLOY_STATUS" != "live" ]; then
+              echo "::error::Render deploy timed out (last status: ${DEPLOY_STATUS})"
+              exit 1
+            fi
+
+            RENDER_PREVIEW_HOST="${RENDER_SERVICE_NAME}-pr-${PR_NUMBER}.onrender.com"
+            echo "Warming up https://${RENDER_PREVIEW_HOST}/up"
+            curl -sf --max-time 30 "https://${RENDER_PREVIEW_HOST}/up" \
+              || echo "Warmup curl non-fatal: server may still be starting"
           ) &
           RENDER_PID=$!
           trap 'kill $RENDER_PID 2>/dev/null || true; wait $RENDER_PID 2>/dev/null || true' EXIT
