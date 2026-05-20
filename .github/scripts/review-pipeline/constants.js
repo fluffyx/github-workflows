@@ -43,6 +43,7 @@ const LABEL_CONFIG = {
 
 const CHARLIE_LOGINS = new Set(['charliecreates', 'charliecreates[bot]']);
 const CHARLIE_REVIEWER = 'CharlieHelps';
+const CHARLIE_CHECK_NAME = 'charliecreates';
 const GREPTILE_APP_SLUG = 'greptile-apps';
 const GREPTILE_CHECK_NAME = 'Greptile Review';
 const MACROSCOPE_APP_SLUG = 'macroscopeapp';
@@ -56,6 +57,7 @@ module.exports = {
   LABEL_CONFIG,
   CHARLIE_LOGINS,
   CHARLIE_REVIEWER,
+  CHARLIE_CHECK_NAME,
   GREPTILE_APP_SLUG,
   GREPTILE_CHECK_NAME,
   MACROSCOPE_APP_SLUG,

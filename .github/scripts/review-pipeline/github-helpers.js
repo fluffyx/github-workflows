@@ -1,4 +1,4 @@
-const { LABEL_CONFIG, CHARLIE_REVIEWER } = require('./constants.js');
+const { LABEL_CONFIG, CHARLIE_CHECK_NAME, CHARLIE_REVIEWER } = require('./constants.js');
 
 function createHelpers({ github, context, core }) {
   const { owner, repo } = context.repo;
@@ -170,6 +170,85 @@ function createHelpers({ github, context, core }) {
     core.info(`Requested review from ${CHARLIE_REVIEWER} on PR #${prNumber}`);
   }
 
+  async function createPendingCheck(headSha) {
+    const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+      owner,
+      repo,
+      ref: headSha,
+      check_name: CHARLIE_CHECK_NAME,
+      per_page: 100,
+    });
+    const existing = checkRuns.find(
+      (checkRun) =>
+        checkRun.name === CHARLIE_CHECK_NAME &&
+        checkRun.head_sha === headSha &&
+        checkRun.status === 'in_progress',
+    );
+
+    if (existing) {
+      core.info(`Reusing existing in-progress ${CHARLIE_CHECK_NAME} check (id=${existing.id}) for ${headSha}`);
+      return;
+    }
+
+    await github.rest.checks.create({
+      owner,
+      repo,
+      name: CHARLIE_CHECK_NAME,
+      head_sha: headSha,
+      status: 'in_progress',
+      output: {
+        title: CHARLIE_CHECK_NAME,
+        summary: 'Waiting for Charlie to review this PR.',
+      },
+    });
+  }
+
+  async function completeCheck(headSha, conclusion, summary) {
+    const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+      owner,
+      repo,
+      ref: headSha,
+      check_name: CHARLIE_CHECK_NAME,
+      per_page: 100,
+    });
+    const existing =
+      checkRuns.find(
+        (checkRun) =>
+          checkRun.name === CHARLIE_CHECK_NAME &&
+          checkRun.head_sha === headSha &&
+          checkRun.status === 'in_progress',
+      ) ??
+      checkRuns.find(
+        (checkRun) => checkRun.name === CHARLIE_CHECK_NAME && checkRun.head_sha === headSha,
+      );
+    const payload = {
+      owner,
+      repo,
+      status: 'completed',
+      conclusion,
+      completed_at: new Date().toISOString(),
+      output: {
+        title: CHARLIE_CHECK_NAME,
+        summary,
+      },
+    };
+
+    if (!existing) {
+      core.info(`No pending ${CHARLIE_CHECK_NAME} check found for ${headSha}; creating completed check`);
+      await github.rest.checks.create({
+        ...payload,
+        name: CHARLIE_CHECK_NAME,
+        head_sha: headSha,
+      });
+      return;
+    }
+
+    await github.rest.checks.update({
+      ...payload,
+      check_run_id: existing.id,
+    });
+  }
+
   return {
     owner,
     repo,
@@ -185,6 +264,8 @@ function createHelpers({ github, context, core }) {
     getCollaboratorPermission,
     removeCharlieReview,
     requestCharlieReview,
+    createPendingCheck,
+    completeCheck,
   };
 }
 
